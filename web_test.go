@@ -17,6 +17,11 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("Disable all"),
 		[]byte("excluded=new Set"),
 		[]byte("function toast(message,tone)"),
+		[]byte("function providerAPIKey(provider)"),
+		[]byte("lastAttempt:Date.now()"),
+		[]byte("api_key:providerAPIKey(provider)"),
+		[]byte("function visibleProviders(settings)"),
+		[]byte("Add a provider…"),
 	} {
 		if !bytes.Contains(monitorPage, want) {
 			t.Fatalf("monitor page missing %q", want)

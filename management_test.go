@@ -25,6 +25,7 @@ func TestPlanManagementUpdateFetchesAndMerges(t *testing.T) {
 		return nil
 	}
 	response := planManagementUpdate("callback-1", []byte(`{
+		"api_key":"secret-catalog-key",
 		"base_url":"https://opencode.ai/zen/v1/",
 		"suffix":"-free",
 		"models":[{"name":"manual-model","alias":"manual"},{"name":"old-free","alias":"old"}]
@@ -32,7 +33,7 @@ func TestPlanManagementUpdateFetchesAndMerges(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
 	}
-	if gotRequest.HostCallbackID != "callback-1" || gotRequest.URL != "https://opencode.ai/zen/v1/models" {
+	if gotRequest.HostCallbackID != "callback-1" || gotRequest.URL != "https://opencode.ai/zen/v1/models" || gotRequest.Headers.Get("Authorization") != "Bearer secret-catalog-key" {
 		t.Fatalf("host request = %#v", gotRequest)
 	}
 	var plan planResponse

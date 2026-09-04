@@ -35,6 +35,7 @@ type managementRegistrationResponse struct {
 }
 
 type planRequest struct {
+	APIKey  string        `json:"api_key"`
 	BaseURL string        `json:"base_url"`
 	Suffix  string        `json:"suffix"`
 	Models  []modelConfig `json:"models"`
@@ -117,12 +118,16 @@ func planManagementUpdate(hostCallbackID string, body []byte) pluginapi.Manageme
 	if strings.TrimSpace(request.Suffix) == "" {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": "free suffix is required"})
 	}
+	headers := http.Header{"Accept": []string{"application/json"}}
+	if apiKey := strings.TrimSpace(request.APIKey); apiKey != "" {
+		headers.Set("Authorization", "Bearer "+apiKey)
+	}
 	var upstream pluginapi.HTTPResponse
 	if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
 		HostCallbackID: hostCallbackID,
 		Method:         http.MethodGet,
 		URL:            catalogURL,
-		Headers:        http.Header{"Accept": []string{"application/json"}},
+		Headers:        headers,
 	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to fetch model catalog"})
 	}
