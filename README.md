@@ -42,6 +42,14 @@ dist/free-model-sync.so     # Linux or FreeBSD
 dist/free-model-sync.dll    # Windows
 ```
 
+Package a platform release asset:
+
+```sh
+./scripts/package.sh 0.1.0 ./dist/free-model-sync.dylib ./dist
+```
+
+Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, and `checksums.txt` contains its SHA-256 digest.
+
 ## Install
 
 Copy the library to CPA's configured plugin directory. Stop CPA before replacing a loaded plugin library, then restart it.
