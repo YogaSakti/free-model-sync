@@ -18,7 +18,7 @@ The plugin preserves manually configured models. It removes only models it previ
 6. Existing manual models are preserved, obsolete managed models are removed, and current free models are added.
 7. The page applies the merged list through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
 
-The page performs a lazy refresh at most once per hour while it is opened. The cooldown is tracked per provider after every attempt, including failed attempts, so one broken provider does not cause repeated refreshes for every provider. **Sync now** and **Sync monitored** bypass the cooldown.
+The page performs a lazy refresh at most once per hour while it is opened. The cooldown is kept in plugin-page memory for the current CPA session. **Sync now** and **Sync monitored** bypass the cooldown.
 
 ## Requirements
 
@@ -100,10 +100,11 @@ Then open **Free Model Sync** in CPA Management Center:
 3. Expand **Free models** to enable or disable individual discovered models.
 4. Use **Enable all** or **Disable all** for the whole discovered free set.
 5. Click **Sync now**, or use **Sync monitored** for every selected provider.
+6. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Success and failure are shown in both the page status and a temporary toast notification.
 
-Provider selection, discovered free IDs, per-model exclusions, and per-provider attempt timestamps are stored in the current browser's `localStorage`.
+Provider selection, discovered managed IDs, and per-model exclusions are persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Existing browser-local state is migrated once and then removed. A stopped provider is retained with `enabled: false`, preventing it from being auto-added again.
 
 ## Detection examples
 
@@ -149,7 +150,6 @@ Existing aliases are preserved when a free model remains available. New aliases 
 
 - Free-model detection uses ID token boundaries and available zero-pricing metadata; provider-specific flags not represented by either signal require a future detector.
 - Lazy refresh runs only when the management page is opened; the plugin does not run a background scheduler.
-- Monitor selections and per-model exclusions are browser-local and are not shared between devices or browser profiles.
 - The page manages `openai-compatibility` providers only.
 - Providers whose `/models` endpoint requires non-Bearer authentication or custom request fields are not currently supported.
 
