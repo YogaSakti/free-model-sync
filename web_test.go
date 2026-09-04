@@ -18,6 +18,7 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("async function migrateLegacy()"),
 		[]byte("async function saveMonitors()"),
 		[]byte("Enable all"),
+		[]byte("function updateChecks()"),
 		[]byte("Disable all"),
 		[]byte("function toast(message,tone)"),
 		[]byte("Add a provider…"),
