@@ -13,6 +13,8 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("INTERVAL_MS=60*60*1000"),
 		[]byte("api_key:providerAPIKey(provider)"),
 		[]byte("managed:state.managed"),
+		[]byte("function compactManaged(models)"),
+		[]byte("function monitorStateNeedsCompaction(value)"),
 		[]byte("plugins.configs.free-model-sync.monitors"),
 		[]byte("Stop monitoring"),
 		[]byte("async function migrateLegacy()"),

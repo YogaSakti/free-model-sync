@@ -104,7 +104,7 @@ Then open **Free Model Sync** in CPA Management Center:
 
 Success and failure are shown in both the page status and a temporary toast notification.
 
-Provider selection, discovered managed IDs, and per-model exclusions are persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Existing browser-local state is migrated once and then removed. A stopped provider is retained with `enabled: false`, preventing it from being auto-added again.
+Provider selection and per-model exclusions are persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. The `managed` list stores ownership only for zero-priced models whose IDs do not already contain a recognizable `free` token; token-marked models can be reconstructed from their IDs and are not duplicated there. Existing browser-local and older verbose monitor state are compacted automatically. A stopped provider is retained with `enabled: false`, preventing it from being auto-added again.
 
 ## Detection examples
 
