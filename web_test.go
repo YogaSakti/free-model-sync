@@ -18,6 +18,7 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("save.onclick=async()=>"),
 		[]byte("value:{models:next}"),
 		[]byte("out[k]={enabled:s.enabled===true}"),
+		[]byte("function needsCleanup(v)"),
 	} {
 		if !bytes.Contains(monitorPage, want) {
 			t.Fatalf("monitor page missing %q", want)
