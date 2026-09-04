@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: so
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+            ext: dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: CGO_ENABLED=1 go test ./...
+      - name: Build
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/stage
+          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared \
+            -ldflags "-s -w -X main.Version=$version -X main.Commit=${GITHUB_SHA::7} -X main.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            -o "dist/stage/free-model-sync.${{ matrix.ext }}" .
+          rm -f dist/stage/free-model-sync.h
+          asset="free-model-sync_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+          (cd dist/stage && zip -q "../$asset" "free-model-sync.${{ matrix.ext }}")
+          (cd dist && shasum -a 256 "$asset" > "checksums_${{ matrix.goos }}_${{ matrix.goarch }}.txt")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/free-model-sync_*.zip
+            dist/checksums_*.txt
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Combine checksums
+        run: cat dist/checksums_*.txt | sort -k2 > dist/checksums.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/free-model-sync_*.zip dist/checksums.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Free Model Sync $GITHUB_REF_NAME" \
+            --generate-notes
