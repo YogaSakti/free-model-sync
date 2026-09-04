@@ -15,6 +15,7 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("managed:state.managed"),
 		[]byte("function compactManaged(models)"),
 		[]byte("function monitorStateNeedsCompaction(value)"),
+		[]byte("function pruneOrphanMonitors()"),
 		[]byte("plugins.configs.free-model-sync.monitors"),
 		[]byte("Stop monitoring"),
 		[]byte("async function migrateLegacy()"),
