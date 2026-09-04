@@ -4,7 +4,7 @@ Free Model Sync is a native [CLIProxyAPI](https://github.com/router-for-me/CLIPr
 
 It handles providers whose free catalog changes over time and whose model IDs may use different conventions, including mixed patterns such as `model-free`, `model:free`, or `provider/free` in the same catalog.
 
-The plugin preserves manually configured models. It removes only models it previously managed or models whose IDs contain a recognized `free` token.
+The plugin preserves manually configured models. Fetching a catalog never changes provider configuration; model changes happen only after an explicit selection save.
 
 ## How it works
 
@@ -15,10 +15,9 @@ The plugin preserves manually configured models. It removes only models it previ
 5. Free models are inferred per catalog from:
    - a standalone `free` token separated by `-`, `_`, `:`, `/`, or `.`;
    - zero-valued pricing metadata when the catalog supplies it.
-6. Existing manual models are preserved, obsolete managed models are removed, and current free models are added.
-7. The page applies the merged list through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
-
-The page performs a lazy refresh at most once per hour while it is opened. The cooldown is kept in plugin-page memory for the current CPA session. **Sync now** and **Sync monitored** bypass the cooldown.
+6. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
+7. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
+8. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
 
 ## Requirements
 
@@ -97,14 +96,14 @@ Then open **Free Model Sync** in CPA Management Center:
 
 1. Existing providers with recognizable free models appear automatically.
 2. Choose another provider from **Add a provider...** if needed.
-3. Expand **Free models** to enable or disable individual discovered models.
-4. Use **Enable all** or **Disable all** for the whole discovered free set.
-5. Click **Sync now**, or use **Sync monitored** for every selected provider.
+3. Click **Fetch catalog** to load the complete current free set.
+4. Expand **Free models** and edit the checkbox draft.
+5. Use **Enable all** or **Disable all**, then click **Save selection** to update the provider config.
 6. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Success and failure are shown in both the page status and a temporary toast notification.
 
-Provider selection and per-model exclusions are persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. The `managed` list stores ownership only for zero-priced models whose IDs do not already contain a recognizable `free` token; token-marked models can be reconstructed from their IDs and are not duplicated there. Existing browser-local and older verbose monitor state are compacted automatically. A stopped provider is retained with `enabled: false`, preventing it from being auto-added again.
+Only provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. Older `excluded` and `managed` fields are discarded when the page saves monitor state. A stopped provider is retained with `enabled: false`.
 
 ## Detection examples
 
