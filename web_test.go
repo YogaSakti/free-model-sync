@@ -12,7 +12,6 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("INTERVAL_MS=60*60*1000"),
 		[]byte("method='GET'"),
 		[]byte("ensureInferredSettings()"),
-		[]byte("freeCount(provider,suffix)>0"),
 		[]byte("Enable all"),
 		[]byte("Disable all"),
 		[]byte("excluded=new Set"),
@@ -20,6 +19,8 @@ func TestMonitorPageUsesNativeConfigRouteAndLazyInterval(t *testing.T) {
 		[]byte("function providerAPIKey(provider)"),
 		[]byte("lastAttempt:Date.now()"),
 		[]byte("api_key:providerAPIKey(provider)"),
+		[]byte("function knownFreeName(name)"),
+		[]byte("managed:Array.isArray(previous.available)"),
 		[]byte("function visibleProviders(settings)"),
 		[]byte("Add a provider…"),
 	} {

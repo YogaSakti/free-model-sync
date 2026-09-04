@@ -27,7 +27,7 @@ func TestPlanManagementUpdateFetchesAndMerges(t *testing.T) {
 	response := planManagementUpdate("callback-1", []byte(`{
 		"api_key":"secret-catalog-key",
 		"base_url":"https://opencode.ai/zen/v1/",
-		"suffix":"-free",
+		"managed":["old-free"],
 		"models":[{"name":"manual-model","alias":"manual"},{"name":"old-free","alias":"old"}]
 	}`))
 	if response.StatusCode != http.StatusOK {

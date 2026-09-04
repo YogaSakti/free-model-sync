@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -20,17 +21,16 @@ type modelConfig struct {
 	Thinking         json.RawMessage `json:"thinking,omitempty"`
 }
 
-type modelCatalog struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
+type catalogModel struct {
+	ID      string            `json:"id"`
+	Pricing map[string]string `json:"pricing"`
 }
 
-func freeModelIDs(raw []byte, suffix string) ([]string, error) {
-	suffix = strings.TrimSpace(suffix)
-	if suffix == "" {
-		return nil, errors.New("free suffix is required")
-	}
+type modelCatalog struct {
+	Data []catalogModel `json:"data"`
+}
+
+func freeModelIDs(raw []byte) ([]string, error) {
 	var catalog modelCatalog
 	if err := json.Unmarshal(raw, &catalog); err != nil {
 		return nil, errors.New("invalid model catalog")
@@ -39,7 +39,7 @@ func freeModelIDs(raw []byte, suffix string) ([]string, error) {
 	models := make([]string, 0, len(catalog.Data))
 	for _, item := range catalog.Data {
 		id := strings.TrimSpace(item.ID)
-		if id == "" || !strings.HasSuffix(id, suffix) {
+		if id == "" || (!hasFreeToken(id) && !hasZeroPricing(item.Pricing)) {
 			continue
 		}
 		if _, exists := seen[id]; exists {
@@ -52,8 +52,47 @@ func freeModelIDs(raw []byte, suffix string) ([]string, error) {
 	return models, nil
 }
 
-func mergeModels(existing []modelConfig, freeIDs []string, suffix string) []modelConfig {
-	suffix = strings.TrimSpace(suffix)
+func hasFreeToken(id string) bool {
+	parts := strings.FieldsFunc(strings.ToLower(id), func(r rune) bool {
+		switch r {
+		case '-', '_', ':', '/', '.':
+			return true
+		default:
+			return false
+		}
+	})
+	for _, part := range parts {
+		if part == "free" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasZeroPricing(pricing map[string]string) bool {
+	if len(pricing) == 0 {
+		return false
+	}
+	checked := false
+	for _, key := range []string{"prompt", "completion", "input", "output", "request", "image"} {
+		raw, exists := pricing[key]
+		if !exists {
+			continue
+		}
+		checked = true
+		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || value != 0 {
+			return false
+		}
+	}
+	return checked
+}
+
+func mergeModels(existing []modelConfig, previousManaged, freeIDs []string) []modelConfig {
+	managed := make(map[string]struct{}, len(previousManaged))
+	for _, id := range previousManaged {
+		managed[strings.TrimSpace(id)] = struct{}{}
+	}
 	aliases := make(map[string]string)
 	seen := make(map[string]struct{}, len(existing)+len(freeIDs))
 	merged := make([]modelConfig, 0, len(existing)+len(freeIDs))
@@ -63,7 +102,7 @@ func mergeModels(existing []modelConfig, freeIDs []string, suffix string) []mode
 		if model.Name == "" {
 			continue
 		}
-		if suffix != "" && strings.HasSuffix(model.Name, suffix) {
+		if _, owned := managed[model.Name]; owned || hasFreeToken(model.Name) {
 			aliases[model.Name] = model.Alias
 			continue
 		}
@@ -84,17 +123,20 @@ func mergeModels(existing []modelConfig, freeIDs []string, suffix string) []mode
 		seen[id] = struct{}{}
 		alias := aliases[id]
 		if alias == "" {
-			alias = defaultAlias(id, suffix)
+			alias = defaultAlias(id)
 		}
 		merged = append(merged, modelConfig{Name: id, Alias: alias})
 	}
 	return merged
 }
 
-func defaultAlias(id, suffix string) string {
-	id = strings.TrimSuffix(strings.TrimSpace(id), suffix)
+func defaultAlias(id string) string {
+	id = strings.TrimSpace(id)
 	if slash := strings.LastIndexByte(id, '/'); slash >= 0 {
 		id = id[slash+1:]
+	}
+	for _, suffix := range []string{":free", "-free", "_free", ".free"} {
+		id = strings.TrimSuffix(id, suffix)
 	}
 	return id
 }
