@@ -19,6 +19,7 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("none.onclick=()=>"),
 		[]byte("save.onclick=async()=>"),
 		[]byte("value:{models:next}"),
+		[]byte("selected.size}/${free.length}"),
 		[]byte("enabled:s.enabled===true,managed:"),
 		[]byte("function needsCleanup(v)"),
 	} {
