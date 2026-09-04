@@ -11,13 +11,15 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("/v0/management/plugins/free-model-sync/config"),
 		[]byte("/v0/management/plugins/free-model-sync/plan"),
 		[]byte("Save selection"),
-		[]byte("Fetch catalog"),
+		[]byte("Refresh catalog"),
+		[]byte("async function refreshCatalogs(notify=false)"),
+		[]byte("setInterval(()=>void refreshCatalogs(),REFRESH_MS)"),
 		[]byte("Stop monitoring"),
 		[]byte("all.onclick=()=>"),
 		[]byte("none.onclick=()=>"),
 		[]byte("save.onclick=async()=>"),
 		[]byte("value:{models:next}"),
-		[]byte("out[k]={enabled:s.enabled===true}"),
+		[]byte("enabled:s.enabled===true,managed:"),
 		[]byte("function needsCleanup(v)"),
 	} {
 		if !bytes.Contains(monitorPage, want) {

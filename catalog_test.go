@@ -7,7 +7,7 @@ import (
 )
 
 func TestPlanModelsInfersMixedFreePatterns(t *testing.T) {
-	raw := []byte(`{"data":[{"id":"z-ai/glm-5.3-free"},{"id":"nvidia/reasoning:free"},{"id":"orcarouter/free"},{"id":"freeform-paid"},{"id":"zero-price","pricing":{"prompt":"0","completion":"0"}},{"id":"paid/model","pricing":{"prompt":"0.1","completion":"0"}}]}`)
+	raw := []byte(`{"data":[{"id":"z-ai/glm-5.3-free"},{"id":"nvidia/reasoning:free"},{"id":"orcarouter/free"},{"id":"freeform-paid"},{"id":"zero-price","pricing":{"prompt":"0","completion":"0","overrides":[{"prompt":"1"}]}},{"id":"paid/model","pricing":{"prompt":"0.1","completion":"0"}}]}`)
 	free, err := freeModelIDs(raw)
 	if err != nil {
 		t.Fatal(err)

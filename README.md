@@ -103,7 +103,7 @@ Then open **Free Model Sync** in CPA Management Center:
 
 Success and failure are shown in both the page status and a temporary toast notification.
 
-Only provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. Older `excluded` and `managed` fields are discarded when the page saves monitor state. A stopped provider is retained with `enabled: false`.
+Provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. The optional `managed` list stores only selected zero-priced models whose IDs do not contain a recognizable `free` token; it is required solely for safe ownership cleanup. No exclusion list is stored. A stopped provider is retained with `enabled: false`.
 
 ## Detection examples
 

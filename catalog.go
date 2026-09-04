@@ -22,8 +22,8 @@ type modelConfig struct {
 }
 
 type catalogModel struct {
-	ID      string            `json:"id"`
-	Pricing map[string]string `json:"pricing"`
+	ID      string          `json:"id"`
+	Pricing json.RawMessage `json:"pricing"`
 }
 
 type modelCatalog struct {
@@ -69,18 +69,26 @@ func hasFreeToken(id string) bool {
 	return false
 }
 
-func hasZeroPricing(pricing map[string]string) bool {
-	if len(pricing) == 0 {
+func hasZeroPricing(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var pricing map[string]json.RawMessage
+	if json.Unmarshal(raw, &pricing) != nil {
 		return false
 	}
 	checked := false
 	for _, key := range []string{"prompt", "completion", "input", "output", "request", "image"} {
-		raw, exists := pricing[key]
+		valueRaw, exists := pricing[key]
 		if !exists {
 			continue
 		}
 		checked = true
-		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		var text string
+		if json.Unmarshal(valueRaw, &text) != nil {
+			return false
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
 		if err != nil || value != 0 {
 			return false
 		}
