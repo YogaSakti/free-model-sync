@@ -15,10 +15,13 @@ import (
 const (
 	managementPlanPath     = "/plugins/free-model-sync/plan"
 	managementPlanFullPath = "/v0/management" + managementPlanPath
+	managementTestPath     = "/plugins/free-model-sync/test"
+	managementTestFullPath = "/v0/management" + managementTestPath
 	resourcePagePath       = "/monitor"
 	resourcePageFullPath   = "/v0/resource/plugins/free-model-sync" + resourcePagePath
 	maxManagementBodyBytes = 512 * 1024
 	pageCSP                = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:"
+	openAICompatUserAgent  = "cli-proxy-openai-compat"
 )
 
 //go:embed web/monitor.html
@@ -35,10 +38,18 @@ type managementRegistrationResponse struct {
 }
 
 type planRequest struct {
-	APIKey  string        `json:"api_key"`
-	BaseURL string        `json:"base_url"`
-	Managed []string      `json:"managed"`
-	Models  []modelConfig `json:"models"`
+	APIKey  string            `json:"api_key"`
+	BaseURL string            `json:"base_url"`
+	Headers map[string]string `json:"headers"`
+	Managed []string          `json:"managed"`
+	Models  []modelConfig     `json:"models"`
+}
+
+type modelTestRequest struct {
+	APIKey  string            `json:"api_key"`
+	BaseURL string            `json:"base_url"`
+	Headers map[string]string `json:"headers"`
+	Model   string            `json:"model"`
 }
 
 type planResponse struct {
@@ -63,6 +74,10 @@ func handleManagementRegister() ([]byte, error) {
 			Method:      http.MethodPost,
 			Path:        managementPlanPath,
 			Description: "Fetch a provider catalog and plan its free model set",
+		}, {
+			Method:      http.MethodPost,
+			Path:        managementTestPath,
+			Description: "Test a model from a provider",
 		}},
 		Resources: []pluginapi.ResourceRoute{{
 			Path:        resourcePagePath,
@@ -88,6 +103,8 @@ func handleManagement(raw []byte) ([]byte, error) {
 		response = pageResponse()
 	case method == http.MethodPost && (path == managementPlanPath || path == managementPlanFullPath):
 		response = planManagementUpdate(request.HostCallbackID, request.Body)
+	case method == http.MethodPost && (path == managementTestPath || path == managementTestFullPath):
+		response = testManagementModel(request.HostCallbackID, request.Body)
 	default:
 		response = managementJSON(http.StatusNotFound, map[string]string{"error": "route not found"})
 	}
@@ -111,20 +128,16 @@ func planManagementUpdate(hostCallbackID string, body []byte) pluginapi.Manageme
 	if err := json.Unmarshal(body, &request); err != nil {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	catalogURL, err := modelCatalogURL(request.BaseURL)
+	catalogURL, err := providerEndpoint(request.BaseURL, "models")
 	if err != nil {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	headers := http.Header{"Accept": []string{"application/json"}}
-	if apiKey := strings.TrimSpace(request.APIKey); apiKey != "" {
-		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 	var upstream pluginapi.HTTPResponse
 	if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
 		HostCallbackID: hostCallbackID,
 		Method:         http.MethodGet,
 		URL:            catalogURL,
-		Headers:        headers,
+		Headers:        providerHeaders(request.APIKey, request.Headers, ""),
 	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to fetch model catalog"})
 	}
@@ -139,7 +152,84 @@ func planManagementUpdate(hostCallbackID string, body []byte) pluginapi.Manageme
 	})
 }
 
-func modelCatalogURL(baseURL string) (string, error) {
+func testManagementModel(hostCallbackID string, body []byte) pluginapi.ManagementResponse {
+	var request modelTestRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		return managementJSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	request.Model = strings.TrimSpace(request.Model)
+	if request.Model == "" {
+		return managementJSON(http.StatusBadRequest, map[string]string{"error": "model is required"})
+	}
+	endpoint, err := providerEndpoint(request.BaseURL, "chat/completions")
+	if err != nil {
+		return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	payload, err := json.Marshal(struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+		MaxTokens int  `json:"max_tokens"`
+		Stream    bool `json:"stream"`
+	}{
+		Model: request.Model,
+		Messages: []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{{Role: "user", Content: "Reply with OK."}},
+		MaxTokens: 8,
+		Stream:    false,
+	})
+	if err != nil {
+		return managementJSON(http.StatusInternalServerError, map[string]string{"error": "unable to create model test request"})
+	}
+	var upstream pluginapi.HTTPResponse
+	if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
+		HostCallbackID: hostCallbackID,
+		Method:         http.MethodPost,
+		URL:            endpoint,
+		Headers:        providerHeaders(request.APIKey, request.Headers, "application/json"),
+		Body:           payload,
+	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
+		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to test model"})
+	}
+	var completion struct {
+		Choices []struct {
+			Message json.RawMessage `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(upstream.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
+		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
+	}
+	var message map[string]json.RawMessage
+	if err := json.Unmarshal(completion.Choices[0].Message, &message); err != nil || len(message) == 0 {
+		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
+	}
+	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})
+}
+
+func providerHeaders(apiKey string, custom map[string]string, contentType string) http.Header {
+	headers := make(http.Header)
+	headers.Set("Accept", "application/json")
+	headers.Set("User-Agent", openAICompatUserAgent)
+	if contentType != "" {
+		headers.Set("Content-Type", contentType)
+	}
+	if apiKey := strings.TrimSpace(apiKey); apiKey != "" {
+		headers.Set("Authorization", "Bearer "+apiKey)
+	}
+	for name, value := range custom {
+		name = strings.TrimSpace(name)
+		if name != "" && value != "" {
+			headers.Set(name, value)
+		}
+	}
+	return headers
+}
+
+func providerEndpoint(baseURL, endpoint string) (string, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -147,7 +237,7 @@ func modelCatalogURL(baseURL string) (string, error) {
 	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/models"
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + endpoint
 	return parsed.String(), nil
 }
 
