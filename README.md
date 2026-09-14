@@ -50,12 +50,7 @@ Package a platform release asset:
 
 Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, and `checksums.txt` contains its SHA-256 digest.
 
-Tagged releases are built and published by GitHub Actions for macOS arm64 and Linux amd64. The release workflow starts when a version tag is pushed, for example:
-
-~~~sh
-git tag v0.7.0
-git push origin v0.7.0
-~~~
+Release Please watches conventional commits merged into `main` and maintains a release PR. Merging that release PR creates the next semantic version, runs tests, builds the Linux amd64 archive, and uploads it to the GitHub Release. `fix:` commits produce patches, `feat:` commits produce minor releases, and documentation-only commits do not trigger a release.
 
 ## Install
 
@@ -107,8 +102,8 @@ Then open **Free Model Sync** in CPA Management Center:
 2. Choose another provider from **Add a provider...** if needed. Adding it starts monitoring and fetches its catalog immediately.
 3. Click **Refresh catalog** to fetch the latest free set again.
 4. Expand **Free models** and edit the checkbox draft.
-5. Use **Enable all** or **Disable all**, then click **Save selection** to update the provider config.
-6. Click **Test selected** to send a small non-streaming chat request to each checked model and see pass/fail results. These are real provider requests and may count toward provider quotas; testing does not save the selection.
+5. Use **Select all** or **Deselect all**, then click **Save selection** to update the provider config.
+6. Click **Test selected** to send a small non-streaming chat request to each checked model and see pass/fail results. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
 7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.

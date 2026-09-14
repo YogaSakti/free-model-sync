@@ -61,3 +61,20 @@ func TestMonitorPageFollowsCPAMPTheme(t *testing.T) {
 		t.Fatal("monitor page must not force a light-only color scheme")
 	}
 }
+
+func TestMonitorPageGroupsDraftActionsAndTestsAvailableModels(t *testing.T) {
+	for _, want := range [][]byte{
+		[]byte(`className='tool-actions'`),
+		[]byte(`className='tool-save'`),
+		[]byte(`all.textContent='Select all'`),
+		[]byte(`none.textContent='Deselect all'`),
+		[]byte(`checked.length?checked:free`),
+		[]byte(`selectPassing=!checked.length`),
+		[]byte(`testButton.textContent=checked.length?'Test selected':'Test and select'`),
+		[]byte(`if(selectPassing&&passedNames.has(name))input.checked=true`),
+	} {
+		if !bytes.Contains(monitorPage, want) {
+			t.Fatalf("monitor page is missing model action behavior %q", want)
+		}
+	}
+}

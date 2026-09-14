@@ -2,30 +2,40 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: go
+
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: so
-          - os: macos-14
-            goos: darwin
-            goarch: arm64
-            ext: dylib
-    runs-on: ${{ matrix.os }}
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.release.outputs.tag_name }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -35,40 +45,43 @@ jobs:
         run: CGO_ENABLED=1 go test ./...
       - name: Build
         shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
           mkdir -p dist/stage
           CGO_ENABLED=1 go build -trimpath -buildmode=c-shared \
-            -ldflags "-s -w -X main.Version=$version -X main.Commit=${GITHUB_SHA::7} -X main.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-            -o "dist/stage/free-model-sync.${{ matrix.ext }}" .
+            -ldflags "-s -w -X main.Version=$VERSION -X main.Commit=${GITHUB_SHA::7} -X main.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            -o dist/stage/free-model-sync.so .
           rm -f dist/stage/free-model-sync.h
-          asset="free-model-sync_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
-          (cd dist/stage && zip -q "../$asset" "free-model-sync.${{ matrix.ext }}")
-          (cd dist && shasum -a 256 "$asset" > "checksums_${{ matrix.goos }}_${{ matrix.goarch }}.txt")
+          asset="free-model-sync_${VERSION}_linux_amd64.zip"
+          (cd dist/stage && zip -q "../$asset" free-model-sync.so)
+          (cd dist && shasum -a 256 "$asset" > checksums.txt)
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: release-linux-amd64
           path: |
             dist/free-model-sync_*.zip
-            dist/checksums_*.txt
+            dist/checksums.txt
 
   publish:
-    needs: build
+    needs:
+      - release
+      - build
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          name: release-linux-amd64
           path: dist
-          merge-multiple: true
-      - name: Combine checksums
-        run: cat dist/checksums_*.txt | sort -k2 > dist/checksums.txt
-      - name: Publish release
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release upload "$TAG_NAME" \
             dist/free-model-sync_*.zip dist/checksums.txt \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Free Model Sync $GITHUB_REF_NAME" \
-            --generate-notes
+            --clobber
