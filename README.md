@@ -180,4 +180,4 @@ CGO_ENABLED=1 go test -race ./...
 
 ## License
 
-No license has been granted yet. Add a license file before allowing reuse or redistribution beyond GitHub's default viewing and forking permissions.
+Licensed under the [MIT License](LICENSE).
