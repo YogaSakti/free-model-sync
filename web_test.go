@@ -39,3 +39,25 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestMonitorPageFollowsCPAMPTheme(t *testing.T) {
+	for _, want := range [][]byte{
+		[]byte(`:root[data-theme="dark"],:root.theme-dark`),
+		[]byte(`:root[data-theme="white"],:root.theme-light`),
+		[]byte(`color-scheme:dark`),
+		[]byte(`color-scheme:light`),
+		[]byte(`var(--app-bg`),
+		[]byte(`var(--app-surface`),
+		[]byte(`var(--app-text-primary`),
+		[]byte(`var(--primary-solid`),
+		[]byte(`var(--primary-contrast`),
+		[]byte(`@media(prefers-color-scheme:light)`),
+	} {
+		if !bytes.Contains(monitorPage, want) {
+			t.Fatalf("monitor page is missing theme support %q", want)
+		}
+	}
+	if bytes.Contains(monitorPage, []byte(`:root{color-scheme:light;`)) {
+		t.Fatal("monitor page must not force a light-only color scheme")
+	}
+}
