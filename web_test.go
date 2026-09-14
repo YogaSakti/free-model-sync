@@ -17,6 +17,7 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("Refresh catalog"),
 		[]byte("headers:p.headers"),
 		[]byte("const catalog=await fetchCatalog(p)"),
+		[]byte("if(previous)monitors[providerID]=previous;else delete monitors[providerID]"),
 		[]byte("async function refreshCatalogs(notify=false)"),
 		[]byte("setInterval(()=>void refreshCatalogs(),REFRESH_MS)"),
 		[]byte("Stop monitoring"),

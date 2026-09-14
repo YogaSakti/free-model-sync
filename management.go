@@ -196,9 +196,15 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to test model"})
 	}
 	var completion struct {
-		Choices []json.RawMessage `json:"choices"`
+		Choices []struct {
+			Message json.RawMessage `json:"message"`
+		} `json:"choices"`
 	}
-	if err := json.Unmarshal(upstream.Body, &completion); err != nil || len(completion.Choices) == 0 {
+	if err := json.Unmarshal(upstream.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
+		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
+	}
+	var message map[string]json.RawMessage
+	if err := json.Unmarshal(completion.Choices[0].Message, &message); err != nil || len(message) == 0 {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
 	}
 	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})

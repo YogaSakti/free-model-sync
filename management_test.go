@@ -196,6 +196,23 @@ func TestTestModelDoesNotExposeProviderFailureBody(t *testing.T) {
 	}
 }
 
+func TestTestModelRejectsMalformedChoice(t *testing.T) {
+	previous := hostCall
+	t.Cleanup(func() { hostCall = previous })
+	hostCall = func(_ string, request any, result any) error {
+		*result.(*pluginapi.HTTPResponse) = pluginapi.HTTPResponse{
+			StatusCode: http.StatusOK,
+			Body:       []byte("{\"choices\":[null]}"),
+		}
+		return nil
+	}
+
+	response := callModelTestEndpoint(t, []byte("{\"base_url\":\"https://opencode.ai/zen/v1\",\"model\":\"example/free\"}"))
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+}
+
 func TestManagementRegisterExposesPagePlanAndModelTest(t *testing.T) {
 	raw, err := handleManagementRegister()
 	if err != nil {
