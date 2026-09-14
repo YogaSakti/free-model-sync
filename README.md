@@ -11,13 +11,14 @@ The plugin preserves manually configured models. Fetching a catalog never change
 1. The plugin adds a **Free Model Sync** page to CPA Management Center.
 2. The page reads providers from CPA's native `/v0/management/openai-compatibility` endpoint.
 3. Providers already containing recognizable free models are monitored automatically unless they are disabled. Other providers remain in an **Add provider** picker and are not rendered until selected.
-4. The plugin fetches each selected provider's `/models` catalog through CPA's `host.http.do` callback. The configured provider API key is sent as a Bearer token when available.
-5. Free models are inferred per catalog from:
+4. Adding a provider starts monitoring and immediately fetches its `/models` catalog through CPA's `host.http.do` callback. Manual and hourly catalog refreshes use the same path.
+5. Configured provider API keys are sent as Bearer tokens by default. Custom provider headers are forwarded on catalog and model-test requests and can override defaults, including Authorization and User-Agent. If no User-Agent is configured, requests use cli-proxy-openai-compat.
+6. Free models are inferred per catalog from:
    - a standalone `free` token separated by `-`, `_`, `:`, `/`, or `.`;
    - zero-valued pricing metadata when the catalog supplies it.
-6. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
-7. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
-8. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
+7. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
+8. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
+9. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
 
 ## Requirements
 
@@ -49,7 +50,12 @@ Package a platform release asset:
 
 Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, and `checksums.txt` contains its SHA-256 digest.
 
-Tagged releases are built and published by GitHub Actions for macOS arm64 and Linux amd64.
+Tagged releases are built and published by GitHub Actions for macOS arm64 and Linux amd64. The release workflow starts when a version tag is pushed, for example:
+
+~~~sh
+git tag v0.7.0
+git push origin v0.7.0
+~~~
 
 ## Install
 
@@ -86,6 +92,9 @@ openai-compatibility:
     base-url: https://api.tokenrouter.com/v1
     api-key-entries:
       - api-key: sk-your-provider-key
+    headers:
+      User-Agent: provider-client/1.0
+      X-Provider-Header: your-header-value
     models:
       - name: paid/model
         alias: paid-model
@@ -95,13 +104,14 @@ openai-compatibility:
 Then open **Free Model Sync** in CPA Management Center:
 
 1. Existing providers with recognizable free models appear automatically.
-2. Choose another provider from **Add a provider...** if needed.
-3. Click **Fetch catalog** to load the complete current free set.
+2. Choose another provider from **Add a provider...** if needed. Adding it starts monitoring and fetches its catalog immediately.
+3. Click **Refresh catalog** to fetch the latest free set again.
 4. Expand **Free models** and edit the checkbox draft.
 5. Use **Enable all** or **Disable all**, then click **Save selection** to update the provider config.
-6. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
+6. Click **Test selected** to send a small non-streaming chat request to each checked model and see pass/fail results. These are real provider requests and may count toward provider quotas; testing does not save the selection.
+7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
-Success and failure are shown in both the page status and a temporary toast notification.
+Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.
 
 Provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. The optional `managed` list stores only selected zero-priced models whose IDs do not contain a recognizable `free` token; it is required solely for safe ownership cleanup. No exclusion list is stored. A stopped provider is retained with `enabled: false`.
 
@@ -150,12 +160,12 @@ Existing aliases are preserved when a free model remains available. New aliases 
 - Free-model detection uses ID token boundaries and available zero-pricing metadata; provider-specific flags not represented by either signal require a future detector.
 - Lazy refresh runs only when the management page is opened; the plugin does not run a background scheduler.
 - The page manages `openai-compatibility` providers only.
-- Providers whose `/models` endpoint requires non-Bearer authentication or custom request fields are not currently supported.
+- Provider-specific request-body fields are not supported. Providers that need non-Bearer authentication can supply it with custom headers in their `openai-compatibility` entry.
 
 ## Security
 
 - Model catalog requests use CPA's `host.http.do` callback instead of a custom network client.
-- Provider API keys are forwarded only to their configured catalog endpoint and are not stored by the plugin.
+- Provider API keys and custom headers are forwarded only to the configured provider's `/models` and `/chat/completions` endpoints; the plugin does not store them.
 - Configuration changes use CPA's authenticated native Management API.
 - The plugin does not log or render provider API keys or the Management Center password.
 - The browser page is bundled, same-origin, and does not load third-party scripts.
