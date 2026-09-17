@@ -50,6 +50,10 @@ Package a platform release asset:
 
 Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, and `checksums.txt` contains its SHA-256 digest.
 
+Prebuilt archives on the GitHub Release cover `linux_amd64` only. Cross-building
+the other platforms needs a matching C toolchain for `-buildmode=c-shared` on each
+target, so macOS, Windows, and FreeBSD build from source with `./scripts/build.sh`.
+
 Release Please watches conventional commits merged into `main` and maintains a release PR. Merging that release PR creates the next semantic version, runs tests, builds the Linux amd64 archive, and uploads it to the GitHub Release. `fix:` commits produce patches, `feat:` commits produce minor releases, and documentation-only commits do not trigger a release.
 
 ## Install
