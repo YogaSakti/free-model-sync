@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2](https://github.com/YogaSakti/free-model-sync/compare/v0.9.1...v0.9.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* follow OpenCode's split catalog host and judge probes by certainty ([49327ee](https://github.com/YogaSakti/free-model-sync/commit/49327ee1bd188dc35bbcbe1e63c2798379f52e44))
+* follow OpenCode's split catalog host and judge probes by certainty ([c3e61b1](https://github.com/YogaSakti/free-model-sync/commit/c3e61b1749fd4fe694f191ffd89acab5ba0b3c49))
+
 ## [0.9.1](https://github.com/YogaSakti/free-model-sync/compare/v0.9.0...v0.9.1) (2026-09-19)
 
 
