@@ -28,6 +28,17 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("selected.size}/${free.length}"),
 		[]byte("enabled:s.enabled===true,managed:"),
 		[]byte("function needsCleanup(v)"),
+		[]byte("PREFIX_V1='enc::v1::'"),
+		[]byte("PREFIX_V2='enc::v2::'"),
+		[]byte("`${SALT}|v2|${location.host}`"),
+		[]byte("`${SALT}|${location.host}|${navigator.userAgent}`"),
+		[]byte("const token=key();if(!token)throw authError("),
+		[]byte("function failPanel(e)"),
+		[]byte("}catch(e){failPanel(e);status.textContent=e.message"),
+		[]byte("box.className='empty failed'"),
+		[]byte("hint.textContent=AUTH_HINT"),
+		[]byte("retry.textContent='Retry'"),
+		[]byte("response.status===401||response.status===403?authError("),
 	} {
 		if !bytes.Contains(monitorPage, want) {
 			t.Fatalf("monitor page missing %q", want)
