@@ -131,3 +131,100 @@ func eventStreamCarriesCompletion(body []byte) bool {
 	}
 	return found
 }
+
+// catalogCandidates lists the catalog URLs to try for a provider, in order.
+//
+// OpenCode serves its catalog and its inference endpoints under different path
+// prefixes: /inference/openai/v1/chat/completions answers, but
+// /inference/openai/v1/models is a 404 and the catalog lives at
+// /inference/v1/models. Deriving the catalog from the provider base URL is
+// therefore not enough, and hard-coding one path would break at the next move,
+// so the known catalog paths are tried in turn. Other providers keep the
+// single derived URL.
+func catalogCandidates(baseURL string) ([]string, error) {
+	primary, err := providerEndpoint(baseURL, "models")
+	if err != nil {
+		return nil, err
+	}
+	candidates := []string{primary}
+	if !isOpenCodeURL(primary) {
+		return candidates, nil
+	}
+	parsed, err := url.Parse(primary)
+	if err != nil {
+		return candidates, nil
+	}
+	for _, path := range []string{"/inference/v1/models", "/zen/v1/models"} {
+		alternate := parsed.Scheme + "://" + parsed.Host + path
+		if alternate != primary {
+			candidates = append(candidates, alternate)
+		}
+	}
+	return candidates, nil
+}
+
+// probeVerdict is what a single model probe proved.
+type probeVerdict struct {
+	OK     bool
+	Reason string
+	Status int
+	// Unavailable is set only when upstream stated the model cannot serve this
+	// endpoint. Anything less certain leaves it false, because the caller drops
+	// a model that fails and a transport hiccup must not delete a working one.
+	Unavailable bool
+}
+
+// deadModelMessages are the upstream messages that settle a model's fate.
+var deadModelMessages = []string{"model is unavailable", "model is not supported", "endpoint is unavailable"}
+
+// classifyProbe judges one upstream reply.
+//
+// A rate-limited model is reachable: upstream had to accept the request to
+// count it against the quota, so 429 passes.
+func classifyProbe(response *pluginapi.HTTPResponse) probeVerdict {
+	status := response.StatusCode
+	if status == http.StatusTooManyRequests {
+		return probeVerdict{OK: true, Status: status}
+	}
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		verdict := probeVerdict{Reason: fmt.Sprintf("provider returned %d", status), Status: status}
+		switch status {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			verdict.Unavailable = true
+		default:
+			verdict.Unavailable = statesModelIsGone(response.Body)
+		}
+		return verdict
+	}
+	if isEventStream(response) {
+		if !eventStreamCarriesCompletion(response.Body) {
+			return probeVerdict{Reason: "model returned an invalid response", Status: status}
+		}
+		return probeVerdict{OK: true, Status: status}
+	}
+	var completion struct {
+		Choices []struct {
+			Message json.RawMessage `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(response.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
+		return probeVerdict{Reason: "model returned an invalid response", Status: status}
+	}
+	var message map[string]json.RawMessage
+	if err := json.Unmarshal(completion.Choices[0].Message, &message); err != nil || len(message) == 0 {
+		return probeVerdict{Reason: "model returned an invalid response", Status: status}
+	}
+	return probeVerdict{OK: true, Status: status}
+}
+
+// statesModelIsGone reports whether an upstream body settles the model's fate.
+// The body itself is never forwarded; only this judgement leaves the plugin.
+func statesModelIsGone(body []byte) bool {
+	text := strings.ToLower(string(body))
+	for _, message := range deadModelMessages {
+		if strings.Contains(text, message) {
+			return true
+		}
+	}
+	return false
+}

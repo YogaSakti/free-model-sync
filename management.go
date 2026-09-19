@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -161,17 +160,28 @@ func planManagementUpdate(hostCallbackID string, body []byte) pluginapi.Manageme
 	if err := json.Unmarshal(body, &request); err != nil {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	catalogURL, err := providerEndpoint(request.BaseURL, "models")
+	candidates, err := catalogCandidates(request.BaseURL)
 	if err != nil {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
+	catalogURL := ""
 	var upstream pluginapi.HTTPResponse
-	if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
-		HostCallbackID: hostCallbackID,
-		Method:         http.MethodGet,
-		URL:            catalogURL,
-		Headers:        providerHeaders(request.APIKey, request.Headers, "", nil),
-	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
+	for _, candidate := range candidates {
+		var attempt pluginapi.HTTPResponse
+		if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
+			HostCallbackID: hostCallbackID,
+			Method:         http.MethodGet,
+			URL:            candidate,
+			Headers:        providerHeaders(request.APIKey, request.Headers, "", nil),
+		}, &attempt); err != nil {
+			continue
+		}
+		if attempt.StatusCode >= http.StatusOK && attempt.StatusCode < http.StatusMultipleChoices {
+			catalogURL, upstream = candidate, attempt
+			break
+		}
+	}
+	if catalogURL == "" {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to fetch model catalog"})
 	}
 	free, err := freeModelIDs(upstream.Body)
@@ -224,60 +234,33 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		Body:           payload,
 	}, &upstream); err != nil {
 		// The upstream error text can carry provider detail, so only the fact
-		// of the failure is reported.
-		return modelVerdict(request.Model, "provider request failed", 0)
+		// of the failure is reported. A request that never arrived says
+		// nothing about the model, so it is not marked unavailable.
+		return modelVerdict(request.Model, probeVerdict{Reason: "provider request failed"})
 	}
-	if reason := probeFailure(&upstream); reason != "" {
-		return modelVerdict(request.Model, reason, upstream.StatusCode)
-	}
-	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})
+	return modelVerdict(request.Model, classifyProbe(&upstream))
 }
 
 // modelVerdict reports a model that did not answer. The management call itself
 // succeeded, so it answers 200: a 5xx here is indistinguishable from a proxy
 // failure, and an edge that rewrites origin 5xx bodies would replace the
 // reason with its own error page before the page could read it.
-func modelVerdict(model, reason string, upstreamStatus int) pluginapi.ManagementResponse {
-	verdict := map[string]any{"ok": false, "model": model, "reason": reason}
-	if upstreamStatus > 0 {
-		verdict["status"] = upstreamStatus
+func modelVerdict(model string, verdict probeVerdict) pluginapi.ManagementResponse {
+	if verdict.OK {
+		return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": model})
 	}
-	return managementJSON(http.StatusOK, verdict)
+	body := map[string]any{
+		"ok":          false,
+		"model":       model,
+		"reason":      verdict.Reason,
+		"unavailable": verdict.Unavailable,
+	}
+	if verdict.Status > 0 {
+		body["status"] = verdict.Status
+	}
+	return managementJSON(http.StatusOK, body)
 }
 
-// probeFailure judges one model probe and reports why it failed, or an empty
-// string when the model is reachable.
-//
-// A rate-limited model is reachable: upstream had to accept the request to
-// count it against the quota. Reporting it as failed would prune a healthy
-// model, since a failed probe is what drops a model from the selection.
-func probeFailure(response *pluginapi.HTTPResponse) string {
-	if response.StatusCode == http.StatusTooManyRequests {
-		return ""
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Sprintf("provider returned %d", response.StatusCode)
-	}
-	if isEventStream(response) {
-		if !eventStreamCarriesCompletion(response.Body) {
-			return "model returned an invalid response"
-		}
-		return ""
-	}
-	var completion struct {
-		Choices []struct {
-			Message json.RawMessage `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(response.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
-		return "model returned an invalid response"
-	}
-	var message map[string]json.RawMessage
-	if err := json.Unmarshal(completion.Choices[0].Message, &message); err != nil || len(message) == 0 {
-		return "model returned an invalid response"
-	}
-	return ""
-}
 
 func providerHeaders(apiKey string, custom map[string]string, contentType string, defaults http.Header) http.Header {
 	headers := make(http.Header)
