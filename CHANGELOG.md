@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/YogaSakti/free-model-sync/compare/v0.9.0...v0.9.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* report a failed model as a verdict, not a gateway error ([c3289ad](https://github.com/YogaSakti/free-model-sync/commit/c3289ad13ec18b7e4f81281abeb7ff102bc4c728))
+* report a failed model as a verdict, not a gateway error ([052f182](https://github.com/YogaSakti/free-model-sync/commit/052f1829c1b1f4778c669e9d104ddbf2cb31b2c7))
+
 ## [0.9.0](https://github.com/YogaSakti/free-model-sync/compare/v0.8.2...v0.9.0) (2026-09-19)
 
 
