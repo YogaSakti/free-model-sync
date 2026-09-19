@@ -26,6 +26,22 @@ jobs:
         with:
           release-type: go
 
+      # release-please opens a release PR instead of tagging straight away. Merging it
+      # here is what keeps the flow single-step, and it needs a PAT: a merge pushed by
+      # GITHUB_TOKEN does not start this workflow again, so the tag, the archive, and
+      # the GitHub Release would never be produced.
+      - name: Merge release PR
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PLEASE_TOKEN is not set. Merge release PR #$PR_NUMBER by hand to publish." >&2
+            exit 1
+          fi
+          gh pr merge "$PR_NUMBER" --squash --repo "$GITHUB_REPOSITORY"
+
   build:
     needs: release
     if: needs.release.outputs.release_created == 'true'
