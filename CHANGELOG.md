@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/YogaSakti/free-model-sync/compare/v0.8.2...v0.9.0) (2026-09-19)
+
+
+### Features
+
+* name the plugin library after its version ([a373bd7](https://github.com/YogaSakti/free-model-sync/commit/a373bd707122858427b0293742da94e7be6108ee))
+* name the plugin library after its version ([c24f646](https://github.com/YogaSakti/free-model-sync/commit/c24f646b21443c6422174a7f17ea1733c4b3a0b7))
+
 ## [0.8.2](https://github.com/YogaSakti/free-model-sync/compare/v0.8.1...v0.8.2) (2026-09-19)
 
 
