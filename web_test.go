@@ -39,6 +39,9 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		[]byte("hint.textContent=AUTH_HINT"),
 		[]byte("retry.textContent='Retry'"),
 		[]byte("response.status===401||response.status===403?authError("),
+		[]byte("if(verdict&&verdict.ok===false)throw new Error(verdict.reason"),
+		[]byte("reasons.set(name,e.message)"),
+		[]byte("failed.map(n=>reasons.get(n)?n+' ('+reasons.get(n)+')':n)"),
 	} {
 		if !bytes.Contains(monitorPage, want) {
 			t.Fatalf("monitor page missing %q", want)

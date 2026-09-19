@@ -110,7 +110,7 @@ Then open **Free Model Sync** in CPA Management Center:
 3. Click **Refresh catalog** to fetch the latest free set again.
 4. Expand **Free models** and edit the checkbox draft.
 5. Use **Select all** or **Deselect all**, then click **Save selection** to update the provider config.
-6. Click **Test selected** to send a small chat request to each checked model, non-streaming except against OpenCode Zen, which is probed with the streaming fingerprint described above and see pass/fail results. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
+6. Click **Test selected** to send a small chat request to each checked model, non-streaming except against OpenCode Zen, which is probed with the streaming fingerprint described above and see pass/fail results. A model that does not answer is reported as a failed verdict with its reason and the upstream status, not as a gateway error, because a proxy in front of CPA may replace a 5xx body with its own error page before the page can read it. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
 7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -222,12 +223,26 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		Headers:        providerHeaders(request.APIKey, request.Headers, "application/json", fingerprint),
 		Body:           payload,
 	}, &upstream); err != nil {
-		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to test model"})
+		// The upstream error text can carry provider detail, so only the fact
+		// of the failure is reported.
+		return modelVerdict(request.Model, "provider request failed", 0)
 	}
 	if reason := probeFailure(&upstream); reason != "" {
-		return managementJSON(http.StatusBadGateway, map[string]string{"error": reason})
+		return modelVerdict(request.Model, reason, upstream.StatusCode)
 	}
 	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})
+}
+
+// modelVerdict reports a model that did not answer. The management call itself
+// succeeded, so it answers 200: a 5xx here is indistinguishable from a proxy
+// failure, and an edge that rewrites origin 5xx bodies would replace the
+// reason with its own error page before the page could read it.
+func modelVerdict(model, reason string, upstreamStatus int) pluginapi.ManagementResponse {
+	verdict := map[string]any{"ok": false, "model": model, "reason": reason}
+	if upstreamStatus > 0 {
+		verdict["status"] = upstreamStatus
+	}
+	return managementJSON(http.StatusOK, verdict)
 }
 
 // probeFailure judges one model probe and reports why it failed, or an empty
@@ -241,7 +256,7 @@ func probeFailure(response *pluginapi.HTTPResponse) string {
 		return ""
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "unable to test model"
+		return fmt.Sprintf("provider returned %d", response.StatusCode)
 	}
 	if isEventStream(response) {
 		if !eventStreamCarriesCompletion(response.Body) {
