@@ -30,20 +30,32 @@ jobs:
       # here is what keeps the flow single-step, and it needs a PAT: a merge pushed by
       # GITHUB_TOKEN does not start this workflow again, so the tag, the archive, and
       # the GitHub Release would never be produced.
-      # The release PR is looked up with the CLI rather than read from the action's
-      # `pr` output: a step's env is templated even when its `if` is false, so
-      # fromJSON() on that output fails every run that has no release PR.
+      # The PR number comes from the action's own output, passed through env
+      # rather than fromJSON(): a step's env is templated even when its `if` is
+      # false, so fromJSON() on an empty output fails every run without a
+      # release PR. The fallback asks by head branch, which reads the branch
+      # directly; `gh pr list --label` goes through the search API, whose index
+      # lags a few seconds behind a PR the previous step just opened.
       - name: Merge release PR
         env:
-          READ_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
           MERGE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          number=$(GH_TOKEN="$READ_TOKEN" gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --label "autorelease: pending" \
-            --json number \
-            --jq '.[0].number // empty')
+          number=""
+          if [ -n "$RELEASE_PR" ]; then
+            # `bash -e` would abort the step if jq is missing or the output is
+            # not the JSON we expect; fall through to the branch query instead.
+            number=$(printf '%s' "$RELEASE_PR" | jq -r '.number // empty' || true)
+          fi
+          if [ -z "$number" ]; then
+            number=$(gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --head release-please--branches--main \
+              --json number \
+              --jq '.[0].number // empty')
+          fi
           if [ -z "$number" ]; then
             echo "No open release PR."
             exit 0
@@ -52,6 +64,7 @@ jobs:
             echo "RELEASE_PLEASE_TOKEN is not set. Merge release PR #$number by hand to publish." >&2
             exit 1
           fi
+          echo "Merging release PR #$number."
           GH_TOKEN="$MERGE_TOKEN" gh pr merge "$number" --squash --repo "$GITHUB_REPOSITORY"
 
   build:
