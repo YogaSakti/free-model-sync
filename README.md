@@ -11,9 +11,9 @@ The plugin preserves manually configured models. Fetching a catalog never change
 1. The plugin adds a **Free Model Sync** page to CPA Management Center.
 2. The page reads providers from CPA's native `/v0/management/openai-compatibility` endpoint.
 3. Providers already containing recognizable free models are monitored automatically unless they are disabled. Other providers remain in an **Add provider** picker and are not rendered until selected.
-4. Adding a provider starts monitoring and immediately fetches its `/models` catalog through CPA's `host.http.do` callback. Manual and hourly catalog refreshes use the same path. OpenCode serves its catalog and its inference endpoints under different prefixes, so an `opencode.ai` provider also tries `/inference/v1/models` and `/zen/v1/models` when the URL derived from its base URL does not answer. Other providers use the derived URL alone.
+4. Adding a provider starts monitoring and immediately fetches its `/models` catalog through CPA's `host.http.do` callback. Manual and hourly catalog refreshes use the same path. An `opencode.ai` provider falls back to other catalog paths, described under [OpenCode Zen](#opencode-zen).
 5. Configured provider API keys are sent as Bearer tokens by default. Custom provider headers are forwarded on catalog and model-test requests and can override defaults, including Authorization and User-Agent. If no User-Agent is configured, requests use cli-proxy-openai-compat. A custom header whose value is an unresolved CLIProxyAPI `$Name` reference is dropped instead of sent literally.
-6. OpenCode Zen gates its free tier on the official client fingerprint, and the probe bypasses the executor pipeline that would otherwise add it. Model tests against `opencode.ai` therefore carry that fingerprint themselves: the `opencode/1.18.31` User-Agent, the client, project, session and request headers, `Accept: text/event-stream`, a streaming body, and the bash, glob, grep and read tool declarations. Other providers are probed exactly as before. A rate-limited model counts as reachable, because failing it would drop a healthy model from the selection.
+6. Model tests send a small chat request and report a verdict rather than an error status, so the page can say why a model failed; see [Model test verdicts](#model-test-verdicts). Tests against `opencode.ai` carry the official client fingerprint, since the probe bypasses the pipeline that would otherwise add it. Other providers are probed as they always were.
 7. Free models are inferred per catalog from:
    - a standalone `free` token separated by `-`, `_`, `:`, `/`, or `.`;
    - zero-valued pricing metadata when the catalog supplies it.
@@ -64,9 +64,9 @@ Copy the library to CPA's configured plugin directory. Stop CPA before replacing
 Example default locations:
 
 ```text
-~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.dylib
-~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.so
-~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.dll
+~/.cli-proxy-api/plugins/free-model-sync-v0.9.2.dylib
+~/.cli-proxy-api/plugins/free-model-sync-v0.9.2.so
+~/.cli-proxy-api/plugins/free-model-sync-v0.9.2.dll
 ```
 
 Because the file name carries the version, upgrading adds a file rather than replacing one. CPA loads every library in that directory, so delete the previous version before restarting; leaving both loads the plugin twice.
@@ -110,12 +110,107 @@ Then open **Free Model Sync** in CPA Management Center:
 3. Click **Refresh catalog** to fetch the latest free set again.
 4. Expand **Free models** and edit the checkbox draft.
 5. Use **Select all** or **Deselect all**, then click **Save selection** to update the provider config.
-6. Click **Test selected** to send a small chat request to each checked model, non-streaming except against OpenCode Zen, which is probed with the streaming fingerprint described above and see pass/fail results. A model that does not answer is reported as a failed verdict with its reason and the upstream status, not as a gateway error, because a proxy in front of CPA may replace a 5xx body with its own error page before the page can read it. A failure counts as unavailable only when upstream settles it: 401, 403, 404, or a message saying the model or the endpoint is unavailable or unsupported. A transport failure, a 500, or a transient 503 is reported as inconclusive, because dropping a model on one of those is how a working model gets deleted. A rate-limited model passes, since upstream had to accept the request to charge it against the quota. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
+6. Click **Test selected** to send a small chat request to each checked model and see the results, which are explained under [Model test verdicts](#model-test-verdicts). When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
 7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.
 
 Provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. The optional `managed` list stores only selected zero-priced models whose IDs do not contain a recognizable `free` token; it is required solely for safe ownership cleanup. No exclusion list is stored. A stopped provider is retained with `enabled: false`.
+
+## Model test verdicts
+
+A model test asks the provider for a few tokens and reports what came back. The
+management call succeeds even when the model does not, so the endpoint answers
+`200` and puts the outcome in the body. A `5xx` would be indistinguishable from a
+proxy failure, and an edge such as Cloudflare replaces an origin `5xx` body with
+its own error page before the page can read the reason.
+
+```json
+{"ok": false, "model": "jev-1.13-free", "reason": "provider returned 503", "status": 503, "unavailable": true}
+```
+
+A failing test removes a model from the **Test and select** result, so the
+verdict separates what the provider settled from what it did not:
+
+| Upstream reply | Verdict |
+| --- | --- |
+| `2xx` with a usable answer | pass |
+| `429`, including `FreeUsageLimitError` | pass — upstream had to accept the request to charge it against the quota |
+| `401`, `403`, `404` | unavailable |
+| a body saying the model or the endpoint is unavailable or unsupported | unavailable |
+| transport failure, `500`, `502`, a transient `503`, an unreadable `2xx` | inconclusive |
+
+The page counts passed, unavailable, and inconclusive separately. An
+inconclusive result is not evidence that a model is gone, so saving a selection
+taken from one can drop a working model.
+
+Upstream response bodies are never forwarded; only the verdict leaves the
+plugin.
+
+## OpenCode Zen
+
+OpenCode needs two things no other provider does.
+
+**The catalog and the inference endpoints sit under different path prefixes.**
+`https://opencode.ai/inference/openai/v1/chat/completions` answers, but
+`https://opencode.ai/inference/openai/v1/models` is a 404 and the catalog lives
+at `https://opencode.ai/inference/v1/models`. A provider on `opencode.ai`
+therefore tries the URL derived from its base URL, then `/inference/v1/models`,
+then `/zen/v1/models`, and keeps the first that answers.
+
+**The free tier is gated on the official client fingerprint.** A request missing
+any single part is refused with `403 FreeTierError`, so a healthy model would
+look dead. Model tests against `opencode.ai` carry the whole fingerprint: the
+`opencode/1.18.31` User-Agent, `x-opencode-client`, `x-opencode-project`, a
+`ses_` session id, a fresh `msg_` request id per call,
+`Accept: text/event-stream`, `stream: true`, and the bash, glob, grep and read
+tool declarations. The reply is then an event stream, which the plugin reads for
+completion chunks. A first chunk carrying only reasoning still counts, since
+reasoning models open with empty content.
+
+The proxy path is a separate matter: requests routed through CPA are shaped by
+[cpa-opencode-enhancer](https://github.com/YogaSakti/cpa-opencode-enhancer),
+which this plugin's probe cannot use because `host.http.do` bypasses the
+executor pipeline.
+
+A provider entry looks like this:
+
+```yaml
+openai-compatibility:
+  - name: Opencode Zen
+    base-url: https://opencode.ai/inference/openai/v1
+    api-key-entries:
+      - api-key: oc_sk_your-opencode-key
+    models:
+      - name: mimo-v2.5-free
+        alias: mimo-v2.5
+```
+
+Keys issued before the move to the new inference host were revoked; current keys
+start with `oc_sk_`.
+
+Models served only by the Responses API answer `503 Endpoint is unavailable` on
+`/chat/completions`. They are reported as unavailable and are never selected on
+a chat provider.
+
+## Troubleshooting
+
+**The page shows an error instead of the provider list.** The page reads the CPA
+management key from the browser, from the same storage the Management Center
+uses, and both the `enc::v1::` and `enc::v2::` formats are understood. A key
+saved on a different host or port cannot be read, because the stored value is
+tied to the origin. Open the page from the Management Center on the same origin,
+and sign in with *Remember password* enabled — without it the key is never
+persisted for the page to find.
+
+**Refreshing a catalog fails for an OpenCode provider.** Its base URL probably
+points at an inference prefix that serves no catalog; see
+[OpenCode Zen](#opencode-zen) above.
+
+**Every model fails a test.** Check the reason shown next to each model. A row
+of `403` results against `opencode.ai` means the fingerprint did not reach
+upstream; a row of inconclusive results means the probes never got an answer at
+all, and the selection should not be saved in that state.
 
 ## Detection examples
 

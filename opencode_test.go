@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -503,5 +504,30 @@ func TestProbeAcceptsAReasoningOnlyFirstDelta(t *testing.T) {
 	}
 	if !verdict.OK {
 		t.Fatalf("body = %s, a reasoning-only delta still proves the model answered", response.Body)
+	}
+}
+
+// TestVerdictBodyMatchesTheDocumentedShape pins the example printed under
+// "Model test verdicts" in README.md.
+func TestVerdictBodyMatchesTheDocumentedShape(t *testing.T) {
+	stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusServiceUnavailable,
+		Body:       []byte(`{"error":{"message":"Endpoint is unavailable"}}`),
+	})
+
+	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/openai/v1","model":"jev-1.13-free"}`))
+	var got map[string]any
+	if err := json.Unmarshal(response.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"ok":          false,
+		"model":       "jev-1.13-free",
+		"reason":      "provider returned 503",
+		"status":      float64(503),
+		"unavailable": true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("verdict = %#v, want %#v", got, want)
 	}
 }
