@@ -11,7 +11,13 @@ case "$(go env GOOS)" in
   *) ext=so ;;
 esac
 
-output="$out_dir/free-model-sync.$ext"
+# A numeric version is published as v<version>; a label like "dev" is used as is.
+case "$version" in
+  [0-9]*) label="v$version" ;;
+  *) label="$version" ;;
+esac
+
+output="$out_dir/free-model-sync-$label.$ext"
 commit=$(git rev-parse --short HEAD 2>/dev/null || printf '%s' none)
 build_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 CGO_ENABLED=1 go build -trimpath -buildmode=c-shared \
