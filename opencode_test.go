@@ -351,12 +351,157 @@ func TestIsOpenCodeURL(t *testing.T) {
 	}
 }
 
-func TestProbeFailureAcceptsEveryRateLimit(t *testing.T) {
+func TestClassifyProbeAcceptsEveryRateLimit(t *testing.T) {
 	throttled := pluginapi.HTTPResponse{
 		StatusCode: http.StatusTooManyRequests,
 		Body:       []byte(`{"type":"error","error":{"type":"FreeUsageLimitError"}}`),
 	}
-	if reason := probeFailure(&throttled); reason != "" {
-		t.Fatalf("probeFailure = %q, want a rate-limited model to pass", reason)
+	verdict := classifyProbe(&throttled)
+	if !verdict.OK || verdict.Unavailable {
+		t.Fatalf("verdict = %#v, want a rate-limited model to pass", verdict)
+	}
+}
+
+// stubUpstreamSequence answers each host call from fn, recording every request.
+func stubUpstreamSequence(t *testing.T, fn func(hostHTTPRequest) (pluginapi.HTTPResponse, error)) *[]hostHTTPRequest {
+	t.Helper()
+	previous := hostCall
+	t.Cleanup(func() { hostCall = previous })
+	var seen []hostHTTPRequest
+	hostCall = func(_ string, request any, result any) error {
+		call := request.(hostHTTPRequest)
+		seen = append(seen, call)
+		response, err := fn(call)
+		if err != nil {
+			return err
+		}
+		*result.(*pluginapi.HTTPResponse) = response
+		return nil
+	}
+	return &seen
+}
+
+func TestPlanFallsBackToTheOpenCodeCatalogURL(t *testing.T) {
+	seen := stubUpstreamSequence(t, func(call hostHTTPRequest) (pluginapi.HTTPResponse, error) {
+		if call.URL == "https://opencode.ai/inference/v1/models" {
+			return pluginapi.HTTPResponse{StatusCode: http.StatusOK, Body: []byte(`{"data":[{"id":"mimo-v2.5-free"},{"id":"paid"}]}`)}, nil
+		}
+		return pluginapi.HTTPResponse{StatusCode: http.StatusNotFound, Body: []byte(`{"error":"not found"}`)}, nil
+	})
+
+	response := planManagementUpdate("callback-1", []byte(`{
+		"api_key":"oc_sk_key",
+		"base_url":"https://opencode.ai/inference/openai/v1"
+	}`))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	var plan planResponse
+	if err := json.Unmarshal(response.Body, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.CatalogURL != "https://opencode.ai/inference/v1/models" {
+		t.Errorf("catalog_url = %q", plan.CatalogURL)
+	}
+	if len(plan.Free) != 1 || plan.Free[0] != "mimo-v2.5-free" {
+		t.Errorf("free = %v", plan.Free)
+	}
+	if len(*seen) != 2 || (*seen)[0].URL != "https://opencode.ai/inference/openai/v1/models" {
+		t.Errorf("requests = %v", *seen)
+	}
+}
+
+func TestPlanKeepsOneCatalogURLForOtherProviders(t *testing.T) {
+	seen := stubUpstreamSequence(t, func(hostHTTPRequest) (pluginapi.HTTPResponse, error) {
+		return pluginapi.HTTPResponse{StatusCode: http.StatusNotFound}, nil
+	})
+
+	response := planManagementUpdate("callback-1", []byte(`{"base_url":"https://openrouter.ai/api/v1"}`))
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	if len(*seen) != 1 {
+		t.Fatalf("requests = %v, want a single attempt for a non-OpenCode provider", *seen)
+	}
+}
+
+func TestProbeSeparatesDeadModelsFromInconclusiveOnes(t *testing.T) {
+	type want struct {
+		unavailable bool
+	}
+	cases := map[string]struct {
+		upstream pluginapi.HTTPResponse
+		want     want
+	}{
+		"unauthorized":            {pluginapi.HTTPResponse{StatusCode: http.StatusUnauthorized}, want{true}},
+		"free tier gate":          {pluginapi.HTTPResponse{StatusCode: http.StatusForbidden}, want{true}},
+		"not found":               {pluginapi.HTTPResponse{StatusCode: http.StatusNotFound}, want{true}},
+		"model is unavailable":    {pluginapi.HTTPResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":{"message":"Model is unavailable"}}`)}, want{true}},
+		"model is not supported":  {pluginapi.HTTPResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":{"message":"Model is not supported"}}`)}, want{true}},
+		"responses only model":    {pluginapi.HTTPResponse{StatusCode: http.StatusServiceUnavailable, Body: []byte(`{"error":{"message":"Endpoint is unavailable"}}`)}, want{true}},
+		"unexplained bad request": {pluginapi.HTTPResponse{StatusCode: http.StatusBadRequest, Body: []byte(`{"error":{"message":"try again"}}`)}, want{false}},
+		"server error":            {pluginapi.HTTPResponse{StatusCode: http.StatusInternalServerError}, want{false}},
+		"transient unavailable":   {pluginapi.HTTPResponse{StatusCode: http.StatusServiceUnavailable, Body: []byte(`{"error":{"message":"upstream is busy"}}`)}, want{false}},
+		"bad gateway":             {pluginapi.HTTPResponse{StatusCode: http.StatusBadGateway}, want{false}},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			stubUpstream(t, testCase.upstream)
+			response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/openai/v1","model":"candidate-free"}`))
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+			}
+			var verdict struct {
+				OK          bool `json:"ok"`
+				Unavailable bool `json:"unavailable"`
+			}
+			if err := json.Unmarshal(response.Body, &verdict); err != nil {
+				t.Fatal(err)
+			}
+			if verdict.OK {
+				t.Fatal("want a failed verdict")
+			}
+			if verdict.Unavailable != testCase.want.unavailable {
+				t.Errorf("unavailable = %t, want %t", verdict.Unavailable, testCase.want.unavailable)
+			}
+		})
+	}
+}
+
+func TestProbeNeverCallsAnUnreachableProviderDead(t *testing.T) {
+	previous := hostCall
+	t.Cleanup(func() { hostCall = previous })
+	hostCall = func(string, any, any) error { return errors.New("dial tcp: no such host") }
+
+	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/openai/v1","model":"mimo-v2.5-free"}`))
+	var verdict struct {
+		OK          bool `json:"ok"`
+		Unavailable bool `json:"unavailable"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if verdict.OK || verdict.Unavailable {
+		t.Fatalf("verdict = %#v, a transport failure says nothing about the model", verdict)
+	}
+}
+
+func TestProbeAcceptsAReasoningOnlyFirstDelta(t *testing.T) {
+	stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"\",\"reasoning\":\"thinking\"}}]}\n\n" +
+			"data: [DONE]\n\n"),
+	})
+
+	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/openai/v1","model":"nemotron-3-ultra-free"}`))
+	var verdict struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if !verdict.OK {
+		t.Fatalf("body = %s, a reasoning-only delta still proves the model answered", response.Body)
 	}
 }
