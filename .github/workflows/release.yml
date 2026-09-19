@@ -90,12 +90,13 @@ jobs:
           VERSION: ${{ needs.release.outputs.version }}
         run: |
           mkdir -p dist/stage
+          library="free-model-sync-v${VERSION}.so"
           CGO_ENABLED=1 go build -trimpath -buildmode=c-shared \
             -ldflags "-s -w -X main.Version=$VERSION -X main.Commit=${GITHUB_SHA::7} -X main.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-            -o dist/stage/free-model-sync.so .
-          rm -f dist/stage/free-model-sync.h
+            -o "dist/stage/$library" .
+          rm -f "dist/stage/${library%.so}.h"
           asset="free-model-sync_${VERSION}_linux_amd64.zip"
-          (cd dist/stage && zip -q "../$asset" free-model-sync.so)
+          (cd dist/stage && zip -q "../$asset" "$library")
           (cd dist && shasum -a 256 "$asset" > checksums.txt)
       - uses: actions/upload-artifact@v4
         with:

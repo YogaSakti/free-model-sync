@@ -35,21 +35,21 @@ The plugin preserves manually configured models. Fetching a catalog never change
 ./scripts/build.sh dev ./dist
 ```
 
-The output is platform-specific:
+The library carries the version it was built with. A numeric version is written as `v<version>`, and any other label, such as the `dev` above, is used as it stands. The extension is platform-specific:
 
 ```text
-dist/free-model-sync.dylib  # macOS
-dist/free-model-sync.so     # Linux or FreeBSD
-dist/free-model-sync.dll    # Windows
+dist/free-model-sync-dev.dylib  # macOS
+dist/free-model-sync-dev.so     # Linux or FreeBSD
+dist/free-model-sync-dev.dll    # Windows
 ```
 
 Package a platform release asset:
 
 ```sh
-./scripts/package.sh 0.2.1 ./dist/free-model-sync.dylib ./dist
+./scripts/package.sh 0.2.1 ./dist/free-model-sync-dev.dylib ./dist
 ```
 
-Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, and `checksums.txt` contains its SHA-256 digest.
+Release archives follow `free-model-sync_<version>_<goos>_<goarch>.zip`. Each archive contains exactly one platform library at its root, named `free-model-sync-v<version>` with the platform extension, and `checksums.txt` contains its SHA-256 digest.
 
 Prebuilt archives on the GitHub Release cover `linux_amd64` only. Cross-building
 the other platforms needs a matching C toolchain for `-buildmode=c-shared` on each
@@ -64,10 +64,12 @@ Copy the library to CPA's configured plugin directory. Stop CPA before replacing
 Example default locations:
 
 ```text
-~/.cli-proxy-api/plugins/free-model-sync.dylib
-~/.cli-proxy-api/plugins/free-model-sync.so
-~/.cli-proxy-api/plugins/free-model-sync.dll
+~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.dylib
+~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.so
+~/.cli-proxy-api/plugins/free-model-sync-v0.8.2.dll
 ```
+
+Because the file name carries the version, upgrading adds a file rather than replacing one. CPA loads every library in that directory, so delete the previous version before restarting; leaving both loads the plugin twice.
 
 Enable the plugin in `config.yaml`:
 
@@ -108,7 +110,7 @@ Then open **Free Model Sync** in CPA Management Center:
 3. Click **Refresh catalog** to fetch the latest free set again.
 4. Expand **Free models** and edit the checkbox draft.
 5. Use **Select all** or **Deselect all**, then click **Save selection** to update the provider config.
-6. Click **Test selected** to send a small non-streaming chat request to each checked model and see pass/fail results. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
+6. Click **Test selected** to send a small chat request to each checked model, non-streaming except against OpenCode Zen, which is probed with the streaming fingerprint described above and see pass/fail results. When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
 7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
 
 Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.
