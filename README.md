@@ -12,13 +12,14 @@ The plugin preserves manually configured models. Fetching a catalog never change
 2. The page reads providers from CPA's native `/v0/management/openai-compatibility` endpoint.
 3. Providers already containing recognizable free models are monitored automatically unless they are disabled. Other providers remain in an **Add provider** picker and are not rendered until selected.
 4. Adding a provider starts monitoring and immediately fetches its `/models` catalog through CPA's `host.http.do` callback. Manual and hourly catalog refreshes use the same path.
-5. Configured provider API keys are sent as Bearer tokens by default. Custom provider headers are forwarded on catalog and model-test requests and can override defaults, including Authorization and User-Agent. If no User-Agent is configured, requests use cli-proxy-openai-compat.
-6. Free models are inferred per catalog from:
+5. Configured provider API keys are sent as Bearer tokens by default. Custom provider headers are forwarded on catalog and model-test requests and can override defaults, including Authorization and User-Agent. If no User-Agent is configured, requests use cli-proxy-openai-compat. A custom header whose value is an unresolved CLIProxyAPI `$Name` reference is dropped instead of sent literally.
+6. OpenCode Zen gates its free tier on the official client fingerprint, and the probe bypasses the executor pipeline that would otherwise add it. Model tests against `opencode.ai` therefore carry that fingerprint themselves: the `opencode/1.18.31` User-Agent, the client, project, session and request headers, `Accept: text/event-stream`, a streaming body, and the bash, glob, grep and read tool declarations. Other providers are probed exactly as before. A rate-limited model counts as reachable, because failing it would drop a healthy model from the selection.
+7. Free models are inferred per catalog from:
    - a standalone `free` token separated by `-`, `_`, `:`, `/`, or `.`;
    - zero-valued pricing metadata when the catalog supplies it.
-7. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
-8. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
-9. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
+8. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
+9. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
+10. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
 
 ## Requirements
 

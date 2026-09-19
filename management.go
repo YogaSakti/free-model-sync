@@ -52,6 +52,38 @@ type modelTestRequest struct {
 	Model   string            `json:"model"`
 }
 
+// chatProbe is the Chat Completions request the model test sends. Tools are
+// declared only where a provider gates on them; the field is omitted
+// otherwise, leaving the probe as it always was.
+type chatProbe struct {
+	Model     string        `json:"model"`
+	Messages  []chatMessage `json:"messages"`
+	MaxTokens int           `json:"max_tokens"`
+	Stream    bool          `json:"stream"`
+	Tools     []chatTool    `json:"tools,omitempty"`
+}
+
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type chatTool struct {
+	Type     string           `json:"type"`
+	Function chatToolFunction `json:"function"`
+}
+
+type chatToolFunction struct {
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Parameters  chatToolParameters `json:"parameters"`
+}
+
+type chatToolParameters struct {
+	Type       string         `json:"type"`
+	Properties map[string]any `json:"properties"`
+}
+
 type planResponse struct {
 	CatalogURL string        `json:"catalog_url"`
 	Free       []string      `json:"free"`
@@ -137,7 +169,7 @@ func planManagementUpdate(hostCallbackID string, body []byte) pluginapi.Manageme
 		HostCallbackID: hostCallbackID,
 		Method:         http.MethodGet,
 		URL:            catalogURL,
-		Headers:        providerHeaders(request.APIKey, request.Headers, ""),
+		Headers:        providerHeaders(request.APIKey, request.Headers, "", nil),
 	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to fetch model catalog"})
 	}
@@ -165,23 +197,20 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 	if err != nil {
 		return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	payload, err := json.Marshal(struct {
-		Model    string `json:"model"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-		MaxTokens int  `json:"max_tokens"`
-		Stream    bool `json:"stream"`
-	}{
-		Model: request.Model,
-		Messages: []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		}{{Role: "user", Content: "Reply with OK."}},
+	probe := chatProbe{
+		Model:     request.Model,
+		Messages:  []chatMessage{{Role: "user", Content: "Reply with OK."}},
 		MaxTokens: 8,
-		Stream:    false,
-	})
+	}
+	var fingerprint http.Header
+	if isOpenCodeURL(endpoint) {
+		// Zen answers 403 FreeTierError unless the client fingerprint, the
+		// stream flag and the tool quartet all arrive together.
+		fingerprint = openCodeHeaders()
+		probe.Stream = true
+		probe.Tools = openCodeToolSet()
+	}
+	payload, err := json.Marshal(probe)
 	if err != nil {
 		return managementJSON(http.StatusInternalServerError, map[string]string{"error": "unable to create model test request"})
 	}
@@ -190,27 +219,52 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		HostCallbackID: hostCallbackID,
 		Method:         http.MethodPost,
 		URL:            endpoint,
-		Headers:        providerHeaders(request.APIKey, request.Headers, "application/json"),
+		Headers:        providerHeaders(request.APIKey, request.Headers, "application/json", fingerprint),
 		Body:           payload,
-	}, &upstream); err != nil || upstream.StatusCode < http.StatusOK || upstream.StatusCode >= http.StatusMultipleChoices {
+	}, &upstream); err != nil {
 		return managementJSON(http.StatusBadGateway, map[string]string{"error": "unable to test model"})
+	}
+	if reason := probeFailure(&upstream); reason != "" {
+		return managementJSON(http.StatusBadGateway, map[string]string{"error": reason})
+	}
+	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})
+}
+
+// probeFailure judges one model probe and reports why it failed, or an empty
+// string when the model is reachable.
+//
+// A rate-limited model is reachable: upstream had to accept the request to
+// count it against the quota. Reporting it as failed would prune a healthy
+// model, since a failed probe is what drops a model from the selection.
+func probeFailure(response *pluginapi.HTTPResponse) string {
+	if response.StatusCode == http.StatusTooManyRequests {
+		return ""
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "unable to test model"
+	}
+	if isEventStream(response) {
+		if !eventStreamCarriesCompletion(response.Body) {
+			return "model returned an invalid response"
+		}
+		return ""
 	}
 	var completion struct {
 		Choices []struct {
 			Message json.RawMessage `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.Unmarshal(upstream.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
-		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
+	if err := json.Unmarshal(response.Body, &completion); err != nil || len(completion.Choices) == 0 || len(completion.Choices[0].Message) == 0 {
+		return "model returned an invalid response"
 	}
 	var message map[string]json.RawMessage
 	if err := json.Unmarshal(completion.Choices[0].Message, &message); err != nil || len(message) == 0 {
-		return managementJSON(http.StatusBadGateway, map[string]string{"error": "model returned an invalid response"})
+		return "model returned an invalid response"
 	}
-	return managementJSON(http.StatusOK, map[string]any{"ok": true, "model": request.Model})
+	return ""
 }
 
-func providerHeaders(apiKey string, custom map[string]string, contentType string) http.Header {
+func providerHeaders(apiKey string, custom map[string]string, contentType string, defaults http.Header) http.Header {
 	headers := make(http.Header)
 	headers.Set("Accept", "application/json")
 	headers.Set("User-Agent", openAICompatUserAgent)
@@ -220,11 +274,20 @@ func providerHeaders(apiKey string, custom map[string]string, contentType string
 	if apiKey := strings.TrimSpace(apiKey); apiKey != "" {
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
+	for name, values := range defaults {
+		if len(values) > 0 {
+			headers.Set(name, values[0])
+		}
+	}
 	for name, value := range custom {
 		name = strings.TrimSpace(name)
-		if name != "" && value != "" {
-			headers.Set(name, value)
+		// A value like "$X-Opencode-Session" is a CLIProxyAPI reference this
+		// plugin cannot resolve. Sending the literal is worse than sending
+		// nothing, so drop it the way util.extractCustomHeaders does.
+		if name == "" || value == "" || strings.HasPrefix(strings.TrimSpace(value), "$") {
+			continue
 		}
+		headers.Set(name, value)
 	}
 	return headers
 }

@@ -137,14 +137,14 @@ func TestHandleManagementTestsSelectedModel(t *testing.T) {
 
 	response := callModelTestEndpoint(t, []byte(`{
 				"api_key":"bearer-key",
-				"base_url":"https://opencode.ai/zen/v1",
+				"base_url":"https://openrouter.ai/api/v1",
 				"headers":{"X-Provider":"chat-token","Authorization":"Token custom","User-Agent":"provider-agent"},
 				"model":"example/free"
 			}`))
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
 	}
-	if gotRequest.Method != http.MethodPost || gotRequest.URL != "https://opencode.ai/zen/v1/chat/completions" || gotRequest.HostCallbackID != "callback-1" {
+	if gotRequest.Method != http.MethodPost || gotRequest.URL != "https://openrouter.ai/api/v1/chat/completions" || gotRequest.HostCallbackID != "callback-1" {
 		t.Fatalf("host request = %#v", gotRequest)
 	}
 	if gotRequest.Headers.Get("Content-Type") != "application/json" || gotRequest.Headers.Get("X-Provider") != "chat-token" || gotRequest.Headers.Get("Authorization") != "Token custom" || gotRequest.Headers.Get("User-Agent") != "provider-agent" {
