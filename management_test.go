@@ -191,8 +191,11 @@ func TestTestModelDoesNotExposeProviderFailureBody(t *testing.T) {
 	}
 
 	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"example/free"}`))
-	if response.StatusCode != http.StatusBadGateway || bytes.Contains(response.Body, []byte("private provider detail")) {
+	if response.StatusCode != http.StatusOK || bytes.Contains(response.Body, []byte("private provider detail")) {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	if !bytes.Contains(response.Body, []byte(`"ok":false`)) {
+		t.Fatalf("body = %s, want a failed verdict", response.Body)
 	}
 }
 
@@ -208,7 +211,7 @@ func TestTestModelRejectsMalformedChoice(t *testing.T) {
 	}
 
 	response := callModelTestEndpoint(t, []byte("{\"base_url\":\"https://opencode.ai/zen/v1\",\"model\":\"example/free\"}"))
-	if response.StatusCode != http.StatusBadGateway {
+	if response.StatusCode != http.StatusOK || !bytes.Contains(response.Body, []byte(`"ok":false`)) {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
 	}
 }

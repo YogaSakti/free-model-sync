@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -181,8 +183,25 @@ func TestProbeFailsUnavailableModel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stubUpstream(t, upstream)
 			response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"gone-free"}`))
-			if response.StatusCode != http.StatusBadGateway {
+			// A dead model is a result, not a gateway failure: answering 5xx
+			// lets a proxy replace the body with its own error page, and the
+			// page then cannot say why the model failed.
+			if response.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+			}
+			var verdict struct {
+				OK     bool   `json:"ok"`
+				Reason string `json:"reason"`
+				Status int    `json:"status"`
+			}
+			if err := json.Unmarshal(response.Body, &verdict); err != nil {
+				t.Fatal(err)
+			}
+			if verdict.OK || verdict.Reason == "" {
+				t.Fatalf("verdict = %#v", verdict)
+			}
+			if verdict.Status != upstream.StatusCode {
+				t.Errorf("status = %d, want the upstream status %d", verdict.Status, upstream.StatusCode)
 			}
 		})
 	}
@@ -205,8 +224,41 @@ func TestProbeRejectsEmptyEventStream(t *testing.T) {
 	})
 
 	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"mimo-v2.5-free"}`))
-	if response.StatusCode != http.StatusBadGateway {
+	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	var verdict struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if verdict.OK {
+		t.Fatal("an event stream without a completion chunk must not pass")
+	}
+}
+
+func TestProbeReportsAnUnreachableProviderAsAResult(t *testing.T) {
+	previous := hostCall
+	t.Cleanup(func() { hostCall = previous })
+	hostCall = func(string, any, any) error { return errors.New("dial tcp: no such host") }
+
+	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.invalid/v1","model":"mimo-v2.5-free"}`))
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	var verdict struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if verdict.OK || verdict.Reason == "" {
+		t.Fatalf("verdict = %#v", verdict)
+	}
+	if strings.Contains(verdict.Reason, "no such host") {
+		t.Errorf("reason = %q, want no upstream detail", verdict.Reason)
 	}
 }
 
