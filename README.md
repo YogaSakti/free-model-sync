@@ -54,7 +54,7 @@ Prebuilt archives on the GitHub Release cover `linux_amd64` only. Cross-building
 the other platforms needs a matching C toolchain for `-buildmode=c-shared` on each
 target, so macOS, Windows, and FreeBSD build from source with `./scripts/build.sh`.
 
-Release Please watches conventional commits merged into `main` and maintains a release PR. Merging that release PR creates the next semantic version, runs tests, builds the Linux amd64 archive, and uploads it to the GitHub Release. `fix:` commits produce patches, `feat:` commits produce minor releases, and documentation-only commits do not trigger a release.
+Release Please watches conventional commits merged into `main` and maintains a release PR. The workflow merges that release PR itself, so a single merge into `main` creates the next semantic version, runs tests, builds the Linux amd64 archive, and uploads it to the GitHub Release. Self-merging needs a `RELEASE_PLEASE_TOKEN` secret holding a personal access token with `contents: write` and `pull-requests: write` on this repository; the workflow fails with a reminder if the secret is missing, and the release PR can then be merged by hand. `fix:` commits produce patches, `feat:` commits produce minor releases, and documentation-only commits do not trigger a release.
 
 ## Install
 
