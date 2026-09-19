@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/YogaSakti/free-model-sync/compare/v0.8.0...v0.8.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* read enc::v2 management keys and report auth failures ([793ad2f](https://github.com/YogaSakti/free-model-sync/commit/793ad2ff77ab00fd2db8a34e6c3a32a6bb463f4e))
+* read enc::v2 management keys and report auth failures ([039e91e](https://github.com/YogaSakti/free-model-sync/commit/039e91e26a5d9db548e8d8282d2178b3d3596ac8))
+
 ## [0.8.0](https://github.com/YogaSakti/free-model-sync/compare/v0.7.1...v0.8.0) (2026-09-14)
 
 
