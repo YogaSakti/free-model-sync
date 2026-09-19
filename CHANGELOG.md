@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.2](https://github.com/YogaSakti/free-model-sync/compare/v0.8.1...v0.8.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* pass the OpenCode Zen free-tier gate when testing models ([216351e](https://github.com/YogaSakti/free-model-sync/commit/216351e7537f79de99a53a7a3ceb1518dc9a14fa))
+* pass the OpenCode Zen free-tier gate when testing models ([94e9dc2](https://github.com/YogaSakti/free-model-sync/commit/94e9dc2a2c93e347861769da54ccf0a9aa665b67))
+
 ## [0.8.1](https://github.com/YogaSakti/free-model-sync/compare/v0.8.0...v0.8.1) (2026-09-19)
 
 
