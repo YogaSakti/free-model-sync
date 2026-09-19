@@ -30,17 +30,29 @@ jobs:
       # here is what keeps the flow single-step, and it needs a PAT: a merge pushed by
       # GITHUB_TOKEN does not start this workflow again, so the tag, the archive, and
       # the GitHub Release would never be produced.
+      # The release PR is looked up with the CLI rather than read from the action's
+      # `pr` output: a step's env is templated even when its `if` is false, so
+      # fromJSON() on that output fails every run that has no release PR.
       - name: Merge release PR
-        if: steps.release.outputs.pr != ''
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_NUMBER: ${{ fromJSON(steps.release.outputs.pr).number }}
+          READ_TOKEN: ${{ github.token }}
+          MERGE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "RELEASE_PLEASE_TOKEN is not set. Merge release PR #$PR_NUMBER by hand to publish." >&2
+          number=$(GH_TOKEN="$READ_TOKEN" gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label "autorelease: pending" \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            echo "No open release PR."
+            exit 0
+          fi
+          if [ -z "$MERGE_TOKEN" ]; then
+            echo "RELEASE_PLEASE_TOKEN is not set. Merge release PR #$number by hand to publish." >&2
             exit 1
           fi
-          gh pr merge "$PR_NUMBER" --squash --repo "$GITHUB_REPOSITORY"
+          GH_TOKEN="$MERGE_TOKEN" gh pr merge "$number" --squash --repo "$GITHUB_REPOSITORY"
 
   build:
     needs: release
