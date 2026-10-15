@@ -59,21 +59,23 @@ func openCodeHeaders() http.Header {
 	return headers
 }
 
-// openCodeID renders the official client's id shape: the prefix, the low 48
-// bits of the current millisecond as 12 lowercase hex digits, then 14 base62
-// characters. The random tail keeps two ids in the same millisecond apart.
+// openCodeID renders the official client's id shape. Session timestamps sort
+// newest first; Zen rejects sessions that use the uninverted clock.
 func openCodeID(prefix string) string {
-	milli := uint64(time.Now().UnixMilli())
+	clock := uint64(time.Now().UnixMilli())*0x1000 + 1
+	if prefix == openCodeSessionPrefix {
+		clock = ^clock
+	}
 	raw := make([]byte, 14)
 	if _, err := rand.Read(raw); err != nil {
 		// Randomness is a uniqueness aid here, not a security boundary.
 		for i := range raw {
-			raw[i] = byte(milli >> (8 * (i % 8)))
+			raw[i] = byte(clock >> (8 * (i % 8)))
 		}
 	}
 	var out strings.Builder
 	out.WriteString(prefix)
-	fmt.Fprintf(&out, "%012x", milli&0xFFFFFFFFFFFF)
+	fmt.Fprintf(&out, "%012x", clock&0xFFFFFFFFFFFF)
 	for _, b := range raw {
 		out.WriteByte(base62Alphabet[int(b)%len(base62Alphabet)])
 	}

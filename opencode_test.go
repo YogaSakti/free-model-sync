@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -313,6 +315,20 @@ func TestOpenCodeIDCarriesTheOfficialShape(t *testing.T) {
 			}
 			seen[id] = struct{}{}
 		}
+	}
+}
+
+func TestOpenCodeSessionIDEncodesInvertedCurrentTime(t *testing.T) {
+	before := time.Now().UnixMilli()
+	session := openCodeID(openCodeSessionPrefix)
+	after := time.Now().UnixMilli()
+	encoded, err := strconv.ParseUint(session[4:16], 16, 48)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := ^encoded & 0xFFFFFFFFFFFF
+	if milli := int64(current >> 12); milli < before&0xFFFFFFFFF || milli > after&0xFFFFFFFFF || current&0xFFF != 1 {
+		t.Errorf("session time = %x, want a current millisecond with counter 1", current)
 	}
 }
 
