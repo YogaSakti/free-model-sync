@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.6](https://github.com/YogaSakti/free-model-sync/compare/v0.9.5...v0.9.6) (2026-10-15)
+
+
+### Bug Fixes
+
+* mark pre-inference rate limits inconclusive ([94b1d83](https://github.com/YogaSakti/free-model-sync/commit/94b1d839ad6be6c477669f50218be4f595107411))
+
 ## [0.9.5](https://github.com/YogaSakti/free-model-sync/compare/v0.9.4...v0.9.5) (2026-10-15)
 
 
