@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/YogaSakti/free-model-sync/compare/v0.9.3...v0.9.4) (2026-10-15)
+
+
+### Bug Fixes
+
+* match OpenCode free probe to current inference gate ([9ba872e](https://github.com/YogaSakti/free-model-sync/commit/9ba872e5b8e27a85b0720fc1d7e7e92fa83edb2e))
+
 ## [0.9.3](https://github.com/YogaSakti/free-model-sync/compare/v0.9.2...v0.9.3) (2026-10-15)
 
 
