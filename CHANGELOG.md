@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/YogaSakti/free-model-sync/compare/v0.9.2...v0.9.3) (2026-10-15)
+
+
+### Bug Fixes
+
+* encode OpenCode probe session timestamp ([bf537a5](https://github.com/YogaSakti/free-model-sync/commit/bf537a55531942801950c1657c559861bdbb51b5))
+
 ## [0.9.2](https://github.com/YogaSakti/free-model-sync/compare/v0.9.1...v0.9.2) (2026-09-19)
 
 
