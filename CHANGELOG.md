@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5](https://github.com/YogaSakti/free-model-sync/compare/v0.9.4...v0.9.5) (2026-10-15)
+
+
+### Bug Fixes
+
+* probe Muse models through Responses API ([a3bcde9](https://github.com/YogaSakti/free-model-sync/commit/a3bcde9e76afe708c2d6d75afc4990366cfd04f2))
+
 ## [0.9.4](https://github.com/YogaSakti/free-model-sync/compare/v0.9.3...v0.9.4) (2026-10-15)
 
 
