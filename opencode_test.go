@@ -27,7 +27,8 @@ type probeBody struct {
 		Function struct {
 			Name       string `json:"name"`
 			Parameters struct {
-				Type string `json:"type"`
+				Type       string         `json:"type"`
+				Properties map[string]any `json:"properties"`
 			} `json:"parameters"`
 		} `json:"function"`
 	} `json:"tools"`
@@ -62,11 +63,14 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 
 	response := callModelTestEndpoint(t, []byte(`{
 		"api_key":"bearer-key",
-		"base_url":"https://opencode.ai/zen/v1",
+		"base_url":"https://opencode.ai/inference/v1",
 		"model":"mimo-v2.5-free"
 	}`))
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	if got.URL != "https://opencode.ai/inference/v1/chat/completions" {
+		t.Errorf("URL = %q", got.URL)
 	}
 
 	if ua := got.Headers.Get("User-Agent"); ua != "opencode/1.18.31" {
@@ -84,6 +88,9 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 	if session := got.Headers.Get("X-Opencode-Session"); !sessionIDPattern.MatchString(session) {
 		t.Errorf("X-Opencode-Session = %q", session)
 	}
+	if got.Headers.Get("X-Opencode-Session-Id") != got.Headers.Get("X-Opencode-Session") {
+		t.Error("X-Opencode-Session-Id must match X-Opencode-Session")
+	}
 	if requestID := got.Headers.Get("X-Opencode-Request"); !requestIDPattern.MatchString(requestID) {
 		t.Errorf("X-Opencode-Request = %q", requestID)
 	}
@@ -99,6 +106,9 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 	for _, tool := range payload.Tools {
 		if tool.Type != "function" || tool.Function.Parameters.Type != "object" {
 			t.Errorf("tool = %#v", tool)
+		}
+		if (tool.Function.Name == "bash" || tool.Function.Name == "read") && len(tool.Function.Parameters.Properties) == 0 {
+			t.Errorf("%s tool has an empty parameter schema", tool.Function.Name)
 		}
 		names[tool.Function.Name] = tool.Type
 	}
@@ -346,6 +356,9 @@ func TestOpenCodeHeadersDeclareEveryGate(t *testing.T) {
 	}
 	if !sessionIDPattern.MatchString(headers.Get("X-Opencode-Session")) {
 		t.Errorf("X-Opencode-Session = %q", headers.Get("X-Opencode-Session"))
+	}
+	if headers.Get("X-Opencode-Session-Id") != headers.Get("X-Opencode-Session") {
+		t.Error("X-Opencode-Session-Id must match X-Opencode-Session")
 	}
 	if !requestIDPattern.MatchString(headers.Get("X-Opencode-Request")) {
 		t.Errorf("X-Opencode-Request = %q", headers.Get("X-Opencode-Request"))

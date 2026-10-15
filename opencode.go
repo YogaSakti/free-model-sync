@@ -54,7 +54,9 @@ func openCodeHeaders() http.Header {
 	headers.Set("Accept", openCodeAccept)
 	headers.Set("X-Opencode-Client", openCodeClient)
 	headers.Set("X-Opencode-Project", openCodeProject)
-	headers.Set("X-Opencode-Session", openCodeID(openCodeSessionPrefix))
+	session := openCodeID(openCodeSessionPrefix)
+	headers.Set("X-Opencode-Session", session)
+	headers.Set("X-Opencode-Session-Id", session)
 	headers.Set("X-Opencode-Request", openCodeID(openCodeRequestPrefix))
 	return headers
 }
@@ -91,7 +93,7 @@ func openCodeToolSet() []chatTool {
 			Function: chatToolFunction{
 				Name:        name,
 				Description: "OpenCode built-in " + name + " tool",
-				Parameters:  chatToolParameters{Type: "object", Properties: map[string]any{}},
+				Parameters:  chatToolParameters{Type: "object", Properties: map[string]any{"value": map[string]any{"type": "string"}}},
 			},
 		})
 	}
@@ -136,13 +138,9 @@ func eventStreamCarriesCompletion(body []byte) bool {
 
 // catalogCandidates lists the catalog URLs to try for a provider, in order.
 //
-// OpenCode serves its catalog and its inference endpoints under different path
-// prefixes: /inference/openai/v1/chat/completions answers, but
-// /inference/openai/v1/models is a 404 and the catalog lives at
-// /inference/v1/models. Deriving the catalog from the provider base URL is
-// therefore not enough, and hard-coding one path would break at the next move,
-// so the known catalog paths are tried in turn. Other providers keep the
-// single derived URL.
+// OpenCode has moved its free chat endpoint before. Try known catalog paths
+// so older provider base URLs can still refresh their model list. Other
+// providers keep the single derived URL.
 func catalogCandidates(baseURL string) ([]string, error) {
 	primary, err := providerEndpoint(baseURL, "models")
 	if err != nil {

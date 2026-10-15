@@ -151,20 +151,20 @@ plugin.
 
 OpenCode needs two things no other provider does.
 
-**The catalog and the inference endpoints sit under different path prefixes.**
-`https://opencode.ai/inference/openai/v1/chat/completions` answers, but
-`https://opencode.ai/inference/openai/v1/models` is a 404 and the catalog lives
-at `https://opencode.ai/inference/v1/models`. A provider on `opencode.ai`
-therefore tries the URL derived from its base URL, then `/inference/v1/models`,
-then `/zen/v1/models`, and keeps the first that answers.
+**Use the current free-tier endpoint.** As of October 2026, chat and catalog
+requests use `https://opencode.ai/inference/v1`. The older
+`/inference/openai/v1/chat/completions` endpoint rejects free-tier probes with
+`403 FreeTierError`. Catalog refresh still tries alternate OpenCode paths when
+the configured base URL has no model list.
 
 **The free tier is gated on the official client fingerprint.** A request missing
 any single part is refused with `403 FreeTierError`, so a healthy model would
 look dead. Model tests against `opencode.ai` carry the whole fingerprint: the
 `opencode/1.18.31` User-Agent, `x-opencode-client`, `x-opencode-project`, a
-`ses_` session id, a fresh `msg_` request id per call,
-`Accept: text/event-stream`, `stream: true`, and the bash, glob, grep and read
-tool declarations. The reply is then an event stream, which the plugin reads for
+`ses_` session id in both `x-opencode-session` and `x-opencode-session-id`, a
+fresh `msg_` request id per call, `Accept: text/event-stream`, `stream: true`,
+and bash, glob, grep and read tool declarations with nonempty parameter schemas.
+The reply is then an event stream, which the plugin reads for
 completion chunks. A first chunk carrying only reasoning still counts, since
 reasoning models open with empty content.
 
@@ -178,12 +178,12 @@ A provider entry looks like this:
 ```yaml
 openai-compatibility:
   - name: Opencode Zen
-    base-url: https://opencode.ai/inference/openai/v1
+    base-url: https://opencode.ai/inference/v1
     api-key-entries:
       - api-key: oc_sk_your-opencode-key
     models:
-      - name: mimo-v2.5-free
-        alias: mimo-v2.5
+      - name: mimo-v2.6-flash-free
+        alias: mimo-v2.6-flash
 ```
 
 Keys issued before the move to the new inference host were revoked; current keys
