@@ -203,12 +203,12 @@ var deadModelMessages = []string{"model is unavailable", "model is not supported
 
 // classifyProbe judges one upstream reply.
 //
-// A rate-limited model is reachable: upstream had to accept the request to
-// count it against the quota, so 429 passes.
+// A 429 can happen before the provider attempts the model, so it proves no
+// model availability either way.
 func classifyProbe(response *pluginapi.HTTPResponse) probeVerdict {
 	status := response.StatusCode
 	if status == http.StatusTooManyRequests {
-		return probeVerdict{OK: true, Status: status}
+		return probeVerdict{Reason: "provider returned 429", Status: status}
 	}
 	if status < http.StatusOK || status >= http.StatusMultipleChoices {
 		verdict := probeVerdict{Reason: fmt.Sprintf("provider returned %d", status), Status: status}

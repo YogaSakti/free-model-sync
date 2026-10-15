@@ -221,7 +221,7 @@ func TestPlanOmitsUnresolvedHeaderReferences(t *testing.T) {
 	}
 }
 
-func TestProbeTreatsRateLimitedModelAsReachable(t *testing.T) {
+func TestProbeTreatsRateLimitedModelAsInconclusive(t *testing.T) {
 	stubUpstream(t, pluginapi.HTTPResponse{
 		StatusCode: http.StatusTooManyRequests,
 		Body:       []byte(`{"type":"error","error":{"type":"FreeUsageLimitError","message":"daily limit"}}`),
@@ -230,6 +230,18 @@ func TestProbeTreatsRateLimitedModelAsReachable(t *testing.T) {
 	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"mimo-v2.5-free"}`))
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, response.Body)
+	}
+	var verdict struct {
+		OK          bool   `json:"ok"`
+		Unavailable bool   `json:"unavailable"`
+		Status      int    `json:"status"`
+		Reason      string `json:"reason"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil {
+		t.Fatal(err)
+	}
+	if verdict.OK || verdict.Unavailable || verdict.Status != 429 || verdict.Reason == "" {
+		t.Fatalf("rate-limited verdict = %#v, want inconclusive", verdict)
 	}
 }
 
@@ -436,14 +448,14 @@ func TestIsOpenCodeURL(t *testing.T) {
 	}
 }
 
-func TestClassifyProbeAcceptsEveryRateLimit(t *testing.T) {
+func TestClassifyProbeMarksRateLimitInconclusive(t *testing.T) {
 	throttled := pluginapi.HTTPResponse{
 		StatusCode: http.StatusTooManyRequests,
 		Body:       []byte(`{"type":"error","error":{"type":"FreeUsageLimitError"}}`),
 	}
 	verdict := classifyProbe(&throttled)
-	if !verdict.OK || verdict.Unavailable {
-		t.Fatalf("verdict = %#v, want a rate-limited model to pass", verdict)
+	if verdict.OK || verdict.Unavailable || verdict.Status != http.StatusTooManyRequests {
+		t.Fatalf("verdict = %#v, want an inconclusive rate limit", verdict)
 	}
 }
 

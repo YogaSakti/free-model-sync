@@ -135,7 +135,7 @@ verdict separates what the provider settled from what it did not:
 | Upstream reply | Verdict |
 | --- | --- |
 | `2xx` with a usable answer | pass |
-| `429`, including `FreeUsageLimitError` | pass — upstream had to accept the request to charge it against the quota |
+| `429`, including `FreeUsageLimitError` | inconclusive — the request may be rejected before the model is tried |
 | `401`, `403`, `404` | unavailable |
 | a body saying the model or the endpoint is unavailable or unsupported | unavailable |
 | transport failure, `500`, `502`, a transient `503`, an unreadable `2xx` | inconclusive |
