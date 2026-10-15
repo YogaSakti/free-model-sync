@@ -100,6 +100,19 @@ func openCodeToolSet() []chatTool {
 	return tools
 }
 
+// Muse's free models accept Responses requests rather than Chat Completions.
+func openCodeResponseToolSet() []map[string]any {
+	tools := make([]map[string]any, 0, len(openCodeTools))
+	for _, name := range openCodeTools {
+		tools = append(tools, map[string]any{
+			"type": "function", "name": name,
+			"description": "OpenCode built-in " + name + " tool",
+			"parameters":  map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}},
+		})
+	}
+	return tools
+}
+
 // isEventStream reports whether an upstream reply is SSE rather than JSON.
 func isEventStream(response *pluginapi.HTTPResponse) bool {
 	if strings.Contains(strings.ToLower(response.Headers.Get("Content-Type")), "text/event-stream") {
@@ -113,6 +126,7 @@ func isEventStream(response *pluginapi.HTTPResponse) bool {
 // completion chunk. An `error` payload fails even when the status was 200.
 func eventStreamCarriesCompletion(body []byte) bool {
 	found := false
+	responseText, responseDone := false, false
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -129,11 +143,21 @@ func eventStreamCarriesCompletion(body []byte) bool {
 		if _, bad := chunk["error"]; bad {
 			return false
 		}
+		var kind string
+		_ = json.Unmarshal(chunk["type"], &kind)
+		switch kind {
+		case "response.output_text.delta":
+			responseText = true
+		case "response.completed":
+			responseDone = true
+		case "response.failed", "response.incomplete", "error":
+			return false
+		}
 		if _, ok := chunk["choices"]; ok {
 			found = true
 		}
 	}
-	return found
+	return found || (responseText && responseDone)
 }
 
 // catalogCandidates lists the catalog URLs to try for a provider, in order.

@@ -58,6 +58,61 @@ func eventStreamResponse() pluginapi.HTTPResponse {
 	}
 }
 
+func TestMuseProbeUsesResponsesProtocol(t *testing.T) {
+	got := stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n" +
+			"data: {\"type\":\"response.completed\"}\n\n"),
+	})
+	response := callModelTestEndpoint(t, []byte(`{"api_key":"bearer-key","base_url":"https://opencode.ai/inference/v1","model":"muse-spark-1.2-contributor-free"}`))
+	var verdict struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil || !verdict.OK {
+		t.Fatalf("Muse verdict = %s, err = %v", response.Body, err)
+	}
+	if got.URL != "https://opencode.ai/inference/v1/responses" {
+		t.Errorf("URL = %q", got.URL)
+	}
+	var body struct {
+		Input           []any `json:"input"`
+		MaxOutputTokens int   `json:"max_output_tokens"`
+		Store           *bool `json:"store"`
+		Stream          bool  `json:"stream"`
+		Tools           []struct {
+			Name       string `json:"name"`
+			Parameters struct {
+				Properties map[string]any `json:"properties"`
+			} `json:"parameters"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Input) == 0 || body.MaxOutputTokens < 32 || body.Store == nil || *body.Store || !body.Stream {
+		t.Fatalf("Muse request missing Responses fields: %s", got.Body)
+	}
+	if len(body.Tools) != len(openCodeTools) || len(body.Tools[0].Parameters.Properties) == 0 {
+		t.Fatalf("Muse tool declarations = %#v", body.Tools)
+	}
+}
+
+func TestMuseProbeRejectsIncompleteResponse(t *testing.T) {
+	stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       []byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.incomplete\"}\n\n"),
+	})
+	response := callModelTestEndpoint(t, []byte(`{"api_key":"bearer-key","base_url":"https://opencode.ai/inference/v1","model":"muse-spark-1.2-contributor-free"}`))
+	var verdict struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(response.Body, &verdict); err != nil || verdict.OK {
+		t.Fatalf("incomplete Muse verdict = %s, err = %v", response.Body, err)
+	}
+}
+
 func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 	got := stubUpstream(t, eventStreamResponse())
 

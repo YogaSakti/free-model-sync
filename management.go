@@ -221,7 +221,22 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		probe.Stream = true
 		probe.Tools = openCodeToolSet()
 	}
-	payload, err := json.Marshal(probe)
+	var probeBody any = probe
+	if isOpenCodeURL(endpoint) && strings.HasPrefix(strings.ToLower(request.Model), "muse-") {
+		endpoint, err = providerEndpoint(request.BaseURL, "responses")
+		if err != nil {
+			return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		probeBody = map[string]any{
+			"model":             request.Model,
+			"input":             []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
+			"max_output_tokens": 32,
+			"stream":            true,
+			"store":             false,
+			"tools":             openCodeResponseToolSet(),
+		}
+	}
+	payload, err := json.Marshal(probeBody)
 	if err != nil {
 		return managementJSON(http.StatusInternalServerError, map[string]string{"error": "unable to create model test request"})
 	}
@@ -260,7 +275,6 @@ func modelVerdict(model string, verdict probeVerdict) pluginapi.ManagementRespon
 	}
 	return managementJSON(http.StatusOK, body)
 }
-
 
 func providerHeaders(apiKey string, custom map[string]string, contentType string, defaults http.Header) http.Header {
 	headers := make(http.Header)

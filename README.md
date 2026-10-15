@@ -164,9 +164,11 @@ look dead. Model tests against `opencode.ai` carry the whole fingerprint: the
 `ses_` session id in both `x-opencode-session` and `x-opencode-session-id`, a
 fresh `msg_` request id per call, `Accept: text/event-stream`, `stream: true`,
 and bash, glob, grep and read tool declarations with nonempty parameter schemas.
-The reply is then an event stream, which the plugin reads for
-completion chunks. A first chunk carrying only reasoning still counts, since
-reasoning models open with empty content.
+The reply is then an event stream, which the plugin reads for completion
+chunks. Muse models use the Responses protocol with a 32-token budget and must
+emit response text plus a completed event. For chat models, a first chunk
+carrying only reasoning still counts, since reasoning models open with empty
+content.
 
 The proxy path is a separate matter: requests routed through CPA are shaped by
 [cpa-opencode-enhancer](https://github.com/YogaSakti/cpa-opencode-enhancer),
@@ -189,9 +191,8 @@ openai-compatibility:
 Keys issued before the move to the new inference host were revoked; current keys
 start with `oc_sk_`.
 
-Models served only by the Responses API answer `503 Endpoint is unavailable` on
-`/chat/completions`. They are reported as unavailable and are never selected on
-a chat provider.
+Other models that reject both Chat Completions and Responses stay failed in the
+test results. A provider-side model outage can still fail an individual test.
 
 ## Troubleshooting
 
