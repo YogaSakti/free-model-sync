@@ -101,4 +101,5 @@ func errorEnvelope(rpcErr *rpcError) []byte {
 
 func shutdownPlugin() {
 	shuttingDown.Store(true)
+	cancelOpenCodeRequests()
 }

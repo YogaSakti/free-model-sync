@@ -29,6 +29,7 @@ const (
 	openCodeAccept        = "text/event-stream"
 	openCodeSessionPrefix = "ses_"
 	openCodeRequestPrefix = "msg_"
+	openCodeEnvironment   = "<env>\nWorking directory: not provided\n</env>"
 	base62Alphabet        = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
@@ -122,10 +123,10 @@ func isEventStream(response *pluginapi.HTTPResponse) bool {
 	return strings.HasPrefix(trimmed, "data:") || strings.HasPrefix(trimmed, "event:")
 }
 
-// eventStreamCarriesCompletion reports whether an SSE body holds at least one
-// completion chunk. An `error` payload fails even when the status was 200.
+// eventStreamCarriesCompletion requires visible text and a completed stream.
+// An error payload fails even when the status was 200.
 func eventStreamCarriesCompletion(body []byte) bool {
-	found := false
+	chatText, chatDone := false, false
 	responseText, responseDone := false, false
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(line)
@@ -133,7 +134,11 @@ func eventStreamCarriesCompletion(body []byte) bool {
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
+		if payload == "[DONE]" {
+			chatDone = true
+			continue
+		}
+		if payload == "" {
 			continue
 		}
 		var chunk map[string]json.RawMessage
@@ -147,17 +152,29 @@ func eventStreamCarriesCompletion(body []byte) bool {
 		_ = json.Unmarshal(chunk["type"], &kind)
 		switch kind {
 		case "response.output_text.delta":
-			responseText = true
+			var delta string
+			if json.Unmarshal(chunk["delta"], &delta) == nil && strings.TrimSpace(delta) != "" {
+				responseText = true
+			}
 		case "response.completed":
 			responseDone = true
 		case "response.failed", "response.incomplete", "error":
 			return false
 		}
-		if _, ok := chunk["choices"]; ok {
-			found = true
+		var choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+		}
+		if json.Unmarshal(chunk["choices"], &choices) == nil {
+			for _, choice := range choices {
+				if strings.TrimSpace(choice.Delta.Content) != "" {
+					chatText = true
+				}
+			}
 		}
 	}
-	return found || (responseText && responseDone)
+	return (chatText && chatDone) || (responseText && responseDone)
 }
 
 // catalogCandidates lists the catalog URLs to try for a provider, in order.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os/exec"
 	"testing"
 )
 
@@ -53,6 +54,41 @@ func TestMonitorPageUsesExplicitModelSelection(t *testing.T) {
 		if bytes.Contains(monitorPage, forbidden) {
 			t.Fatalf("monitor page still contains %q", forbidden)
 		}
+	}
+}
+
+func TestMonitorNativeRequestsAndProxySelection(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is unavailable for monitor behavior checks")
+	}
+	const script = `
+const assert=require('node:assert/strict'),vm=require('node:vm');
+let html=require('node:fs').readFileSync(0,'utf8'),calls=[],fail='',proxy='socks5://global:1080';
+const source=html.match(/<script>([\s\S]*)<\/script>/)[1].replace('load();setInterval(()=>void refreshCatalogs(),REFRESH_MS);','globalThis.monitorTest={id,apiKey,fetchCatalog,testProviderModel,saveSelection,loadSources};');
+const context={document:{getElementById:()=>({})},location:{host:'test'},navigator:{userAgent:'test'},TextEncoder,TextDecoder,atob,
+ localStorage:{getItem:()=>JSON.stringify({state:{managementKey:'management-test'}})},
+ fetch:async(path,options)=>{calls.push({path,body:options.body?JSON.parse(options.body):undefined});if(path===fail)return{ok:false,status:502,json:async()=>({error:'proxy lookup failed'})};return{ok:true,status:200,json:async()=>path.endsWith('/proxy-url')?{'proxy-url':proxy}:path.endsWith('/native/list')?{providers:[]}:path.endsWith('/openai-compatibility')?{'openai-compatibility':[]}:path.endsWith('/config')?{}:path.endsWith('/native/save')?{models:[{name:'new-free',alias:'new'}],managed:[]}:{free:['new-free'],models:[]}};}
+};vm.runInNewContext(source,context);
+(async()=>{const m=context.monitorTest;
+ await m.loadSources();calls=[];
+ const compat={name:'legacy','base-url':'https://opencode.ai/inference/v1','api-key-entries':[{'proxy-url':'socks5://wrong:1080'},{'api-key':'first-key','proxy-url':'socks5://credential:1080'},{'api-key':'second-key','proxy-url':'socks5://second:1080'}]};
+ await m.testProviderModel(compat,'new-free');assert.equal(calls[0].body.api_key,'first-key');assert.equal(calls[0].body.proxy_url,'socks5://credential:1080');
+ calls=[];delete compat['api-key-entries'][1]['proxy-url'];await m.testProviderModel(compat,'new-free');assert.equal(calls[0].body.proxy_url,'socks5://global:1080');
+ const native={id:'auth:native.json',source_kind:'auth',auth_index:'auth-1',name:'native.json','base-url':'https://opencode.ai/inference/openai/v1',models:[]};
+ assert.equal(m.id(native),'auth:native.json');assert.equal(m.id(compat),'legacy\nhttps://opencode.ai/inference/v1');
+ calls=[];await m.fetchCatalog(native);assert.equal(calls[0].path,'/v0/management/plugins/free-model-sync/native/plan');assert.equal(calls[0].body.auth_index,'auth-1');assert.equal(calls[0].body.api_key,undefined);
+ calls=[];await m.testProviderModel(native,'new-free');assert.equal(calls[0].path,'/v0/management/plugins/free-model-sync/native/test');assert.equal(calls[0].body.proxy_url,'socks5://global:1080');assert.equal(calls[0].body.api_key,undefined);
+ calls=[];await m.saveSelection(native,{managed:['old-zero']},new Set(['new-free']),['new-free'],{models:[]});const saved=calls.find(x=>x.path.endsWith('/native/save'));assert.deepEqual(saved.body,{auth_index:'auth-1',selected:['new-free'],managed:['old-zero'],proxy_url:'socks5://global:1080'});assert.equal(native.models[0].alias,'new');assert.equal(calls.some(x=>x.path.endsWith('/openai-compatibility')),false);
+ calls=[];compat.models=[{name:'manual-paid',alias:'custom'},{name:'old-free',alias:'old'},{name:'old-zero',alias:'zero'}];await m.saveSelection(compat,{managed:['old-zero']},new Set(['new-free']),['new-free'],{models:[{name:'new-free',alias:'new'}]});const legacySaved=calls.find(x=>x.path.endsWith('/openai-compatibility'));assert.deepEqual(legacySaved.body.value.models,[{name:'manual-paid',alias:'custom'},{name:'new-free',alias:'new'}]);
+ const retryState={managed:['old-zero']};fail='/v0/management/plugins/free-model-sync/native/save';await assert.rejects(m.saveSelection(native,retryState,new Set(),['new-free'],{models:[]}));assert.deepEqual(Array.from(retryState.managed),['old-zero']);fail='';calls=[];await m.saveSelection(native,retryState,new Set(),['new-free'],{models:[]});assert.deepEqual(calls.find(x=>x.path.endsWith('/native/save')).body.managed,['old-zero']);
+ const compatRetry={managed:['old-zero']};compat.models=[{name:'manual-paid',alias:'custom'},{name:'old-zero',alias:'zero'}];fail='/v0/management/openai-compatibility';await assert.rejects(m.saveSelection(compat,compatRetry,new Set(),['new-free'],{models:[]}));assert.deepEqual(Array.from(compatRetry.managed),['old-zero']);fail='';calls=[];await m.saveSelection(compat,compatRetry,new Set(),['new-free'],{models:[]});assert.deepEqual(calls.find(x=>x.path.endsWith('/openai-compatibility')).body.value.models,[{name:'manual-paid',alias:'custom'}]);
+ fail='/v0/management/proxy-url';await assert.rejects(m.loadSources(),/proxy lookup failed/);calls=[];await assert.rejects(m.testProviderModel(native,'new-free'),/proxy configuration/);assert.equal(calls.length,0);
+})().catch(e=>{console.error(e);process.exitCode=1});`
+	cmd := exec.Command(node, "-e", script)
+	cmd.Stdin = bytes.NewReader(monitorPage)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("monitor behavior: %v\n%s", err, output)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
@@ -180,15 +181,10 @@ func TestTestModelRejectsMissingModel(t *testing.T) {
 }
 
 func TestTestModelDoesNotExposeProviderFailureBody(t *testing.T) {
-	previous := hostCall
-	t.Cleanup(func() { hostCall = previous })
-	hostCall = func(_ string, request any, result any) error {
-		*result.(*pluginapi.HTTPResponse) = pluginapi.HTTPResponse{
-			StatusCode: http.StatusUnauthorized,
-			Body:       []byte(`{"error":"private provider detail"}`),
-		}
-		return nil
-	}
+	stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusUnauthorized,
+		Body:       []byte(`{"error":"private provider detail"}`),
+	})
 
 	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"example/free"}`))
 	if response.StatusCode != http.StatusOK || bytes.Contains(response.Body, []byte("private provider detail")) {
@@ -200,15 +196,10 @@ func TestTestModelDoesNotExposeProviderFailureBody(t *testing.T) {
 }
 
 func TestTestModelRejectsMalformedChoice(t *testing.T) {
-	previous := hostCall
-	t.Cleanup(func() { hostCall = previous })
-	hostCall = func(_ string, request any, result any) error {
-		*result.(*pluginapi.HTTPResponse) = pluginapi.HTTPResponse{
-			StatusCode: http.StatusOK,
-			Body:       []byte("{\"choices\":[null]}"),
-		}
-		return nil
-	}
+	stubUpstream(t, pluginapi.HTTPResponse{
+		StatusCode: http.StatusOK,
+		Body:       []byte("{\"choices\":[null]}"),
+	})
 
 	response := callModelTestEndpoint(t, []byte("{\"base_url\":\"https://opencode.ai/zen/v1\",\"model\":\"example/free\"}"))
 	if response.StatusCode != http.StatusOK || !bytes.Contains(response.Body, []byte(`"ok":false`)) {
@@ -229,7 +220,17 @@ func TestManagementRegisterExposesPagePlanAndModelTest(t *testing.T) {
 	if err := json.Unmarshal(envelope.Result, &registration); err != nil {
 		t.Fatal(err)
 	}
-	if len(registration.Routes) != 2 || registration.Routes[0].Path != managementPlanPath || registration.Routes[1].Path != "/plugins/free-model-sync/test" || len(registration.Resources) != 1 || registration.Resources[0].Path != resourcePagePath {
+	if len(registration.Routes) != 6 || registration.Routes[0].Path != managementPlanPath || registration.Routes[1].Path != "/plugins/free-model-sync/test" || len(registration.Resources) != 1 || registration.Resources[0].Path != resourcePagePath {
 		t.Fatalf("registration = %#v", registration)
+	}
+	want := map[string]string{"list": http.MethodGet, "plan": http.MethodPost, "test": http.MethodPost, "save": http.MethodPatch}
+	for _, route := range registration.Routes[2:] {
+		if want[strings.TrimPrefix(route.Path, nativePath)] != route.Method {
+			t.Fatalf("unexpected native route: %#v", route)
+		}
+		delete(want, strings.TrimPrefix(route.Path, nativePath))
+	}
+	if len(want) > 0 {
+		t.Fatalf("missing native routes: %#v", want)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -39,8 +40,13 @@ type probeBody struct {
 func stubUpstream(t *testing.T, response pluginapi.HTTPResponse) *hostHTTPRequest {
 	t.Helper()
 	previous := hostCall
-	t.Cleanup(func() { hostCall = previous })
+	previousOpenCode := openCodeHTTPDo
+	t.Cleanup(func() { hostCall = previous; openCodeHTTPDo = previousOpenCode })
 	var got hostHTTPRequest
+	openCodeHTTPDo = func(_ context.Context, request hostHTTPRequest, _ string) (pluginapi.HTTPResponse, error) {
+		got = request
+		return response, nil
+	}
 	hostCall = func(_ string, request any, result any) error {
 		got = request.(hostHTTPRequest)
 		*result.(*pluginapi.HTTPResponse) = response
@@ -76,10 +82,11 @@ func TestMuseProbeUsesResponsesProtocol(t *testing.T) {
 		t.Errorf("URL = %q", got.URL)
 	}
 	var body struct {
-		Input           []any `json:"input"`
-		MaxOutputTokens int   `json:"max_output_tokens"`
-		Store           *bool `json:"store"`
-		Stream          bool  `json:"stream"`
+		Instructions    string `json:"instructions"`
+		Input           []any  `json:"input"`
+		MaxOutputTokens int    `json:"max_output_tokens"`
+		Store           *bool  `json:"store"`
+		Stream          bool   `json:"stream"`
 		Tools           []struct {
 			Name       string `json:"name"`
 			Parameters struct {
@@ -92,6 +99,9 @@ func TestMuseProbeUsesResponsesProtocol(t *testing.T) {
 	}
 	if len(body.Input) == 0 || body.MaxOutputTokens < 32 || body.Store == nil || *body.Store || !body.Stream {
 		t.Fatalf("Muse request missing Responses fields: %s", got.Body)
+	}
+	if body.Instructions != "<env>\nWorking directory: not provided\n</env>" {
+		t.Errorf("instructions = %q, want an honest environment context", body.Instructions)
 	}
 	if len(body.Tools) != len(openCodeTools) || len(body.Tools[0].Parameters.Properties) == 0 {
 		t.Fatalf("Muse tool declarations = %#v", body.Tools)
@@ -171,6 +181,28 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 		if _, ok := names[want]; !ok {
 			t.Errorf("tools missing %q, got %v", want, names)
 		}
+	}
+}
+
+func TestOpenCodeProbeIncludesEnvironmentContext(t *testing.T) {
+	got := stubUpstream(t, eventStreamResponse())
+	callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/v1","model":"mimo-v2.5-free"}`))
+	var body struct {
+		Messages  []chatMessage `json:"messages"`
+		MaxTokens int           `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	want := []chatMessage{
+		{Role: "system", Content: "<env>\nWorking directory: not provided\n</env>"},
+		{Role: "user", Content: "Reply with OK."},
+	}
+	if !reflect.DeepEqual(body.Messages, want) {
+		t.Errorf("messages = %#v, want the environment before the probe prompt", body.Messages)
+	}
+	if body.MaxTokens != 128 {
+		t.Errorf("max_tokens = %d, want enough budget for visible probe text", body.MaxTokens)
 	}
 }
 
@@ -315,6 +347,32 @@ func TestProbeRejectsEmptyEventStream(t *testing.T) {
 	}
 	if verdict.OK {
 		t.Fatal("an event stream without a completion chunk must not pass")
+	}
+}
+
+func TestEventStreamRequiresVisibleTextAndCompletion(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		want bool
+	}{
+		"complete chat":          {"data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n\n", true},
+		"role only chat":         {"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: [DONE]\n\n", false},
+		"empty chat":             {"data: {\"choices\":[{\"delta\":{\"content\":\" \"}}]}\n\ndata: [DONE]\n\n", false},
+		"reasoning only chat":    {"data: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking\"}}]}\n\ndata: [DONE]\n\n", false},
+		"empty choices":          {"data: {\"choices\":[]}\n\ndata: [DONE]\n\n", false},
+		"truncated chat":         {"data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n", false},
+		"complete responses":     {"data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.completed\"}\n\n", true},
+		"empty responses":        {"data: {\"type\":\"response.output_text.delta\",\"delta\":\" \"}\n\ndata: {\"type\":\"response.completed\"}\n\n", false},
+		"missing responses text": {"data: {\"type\":\"response.output_text.delta\"}\n\ndata: {\"type\":\"response.completed\"}\n\n", false},
+		"truncated responses":    {"data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n", false},
+		"error after chat text":  {"data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: {\"error\":{\"message\":\"failed\"}}\n\ndata: [DONE]\n\n", false},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := eventStreamCarriesCompletion([]byte(testCase.body)); got != testCase.want {
+				t.Errorf("completion = %t, want %t", got, testCase.want)
+			}
+		})
 	}
 }
 
@@ -566,9 +624,11 @@ func TestProbeSeparatesDeadModelsFromInconclusiveOnes(t *testing.T) {
 }
 
 func TestProbeNeverCallsAnUnreachableProviderDead(t *testing.T) {
-	previous := hostCall
-	t.Cleanup(func() { hostCall = previous })
-	hostCall = func(string, any, any) error { return errors.New("dial tcp: no such host") }
+	previous := openCodeHTTPDo
+	t.Cleanup(func() { openCodeHTTPDo = previous })
+	openCodeHTTPDo = func(context.Context, hostHTTPRequest, string) (pluginapi.HTTPResponse, error) {
+		return pluginapi.HTTPResponse{}, errors.New("dial tcp: no such host")
+	}
 
 	response := callModelTestEndpoint(t, []byte(`{"base_url":"https://opencode.ai/inference/openai/v1","model":"mimo-v2.5-free"}`))
 	var verdict struct {
@@ -588,6 +648,7 @@ func TestProbeAcceptsAReasoningOnlyFirstDelta(t *testing.T) {
 		StatusCode: http.StatusOK,
 		Headers:    http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"\",\"reasoning\":\"thinking\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n" +
 			"data: [DONE]\n\n"),
 	})
 
@@ -599,7 +660,7 @@ func TestProbeAcceptsAReasoningOnlyFirstDelta(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !verdict.OK {
-		t.Fatalf("body = %s, a reasoning-only delta still proves the model answered", response.Body)
+		t.Fatalf("body = %s, an initial reasoning delta must not hide the later answer", response.Body)
 	}
 }
 

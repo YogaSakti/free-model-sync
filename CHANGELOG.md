@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* Include truthful environment context in OpenCode Chat Completions and Muse Responses probes.
+* Give OpenCode chat probes a 128-token budget and require visible text plus stream completion before reporting success.
+* Send OpenCode probes directly with plugin-owned Go/uTLS, without a CPA core patch or relay.
+* Monitor native `opencode-enhancer` auth files and preserve credentials, aliases, and unrelated fields when saving selected free chat models.
+* Respect credential and global proxy settings, reject unsafe auth file targets, and restore ownership tracking after failed saves.
+
 ## [0.9.6](https://github.com/YogaSakti/free-model-sync/compare/v0.9.5...v0.9.6) (2026-10-15)
 
 

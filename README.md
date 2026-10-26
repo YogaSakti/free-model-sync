@@ -1,6 +1,6 @@
 # Free Model Sync
 
-Free Model Sync is a native [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) plugin that monitors selected OpenAI-compatible providers and keeps their currently free models assigned in `config.yaml`.
+Free Model Sync is a native [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) plugin that monitors selected OpenAI-compatible providers and keeps their currently free models assigned in `config.yaml`. It also manages native `opencode-enhancer` auth files for OpenCode free chat models.
 
 It handles providers whose free catalog changes over time and whose model IDs may use different conventions, including mixed patterns such as `model-free`, `model:free`, or `provider/free` in the same catalog.
 
@@ -9,9 +9,9 @@ The plugin preserves manually configured models. Fetching a catalog never change
 ## How it works
 
 1. The plugin adds a **Free Model Sync** page to CPA Management Center.
-2. The page reads providers from CPA's native `/v0/management/openai-compatibility` endpoint.
+2. The page reads compatibility providers from CPA's native `/v0/management/openai-compatibility` endpoint and native OpenCode auth descriptors through the plugin's management routes.
 3. Providers already containing recognizable free models are monitored automatically unless they are disabled. Other providers remain in an **Add provider** picker and are not rendered until selected.
-4. Adding a provider starts monitoring and immediately fetches its `/models` catalog through CPA's `host.http.do` callback. Manual and hourly catalog refreshes use the same path. An `opencode.ai` provider falls back to other catalog paths, described under [OpenCode Zen](#opencode-zen).
+4. Adding a provider starts monitoring and immediately fetches its `/models` catalog. Generic providers use CPA's `host.http.do` callback; native OpenCode sources use this plugin's Go/uTLS transport. Manual and hourly catalog refreshes use the same path. An `opencode.ai` provider falls back to other catalog paths, described under [OpenCode Zen](#opencode-zen).
 5. Configured provider API keys are sent as Bearer tokens by default. Custom provider headers are forwarded on catalog and model-test requests and can override defaults, including Authorization and User-Agent. If no User-Agent is configured, requests use cli-proxy-openai-compat. A custom header whose value is an unresolved CLIProxyAPI `$Name` reference is dropped instead of sent literally.
 6. Model tests send a small chat request and report a verdict rather than an error status, so the page can say why a model failed; see [Model test verdicts](#model-test-verdicts). Tests against `opencode.ai` carry the official client fingerprint, since the probe bypasses the pipeline that would otherwise add it. Other providers are probed as they always were.
 7. Free models are inferred per catalog from:
@@ -19,7 +19,7 @@ The plugin preserves manually configured models. Fetching a catalog never change
    - zero-valued pricing metadata when the catalog supplies it.
 8. The fetched catalog becomes the checklist. A model is checked when it exists in the provider's current `models` list.
 9. Checkbox, **Enable all**, and **Disable all** changes remain local drafts.
-10. **Save selection** preserves manual models and applies only the selected free set through CPA's native `PATCH /v0/management/openai-compatibility` endpoint.
+10. **Save selection** preserves manual models and applies only the selected free set through CPA's native compatibility endpoint or `host.auth.save` for a native OpenCode auth file.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ The plugin preserves manually configured models. Fetching a catalog never change
 - Go 1.27 for local builds
 - A working C compiler for Go's `-buildmode=c-shared`
 - CPA Management Center access
-- OpenAI-compatible provider entries configured under `openai-compatibility`
+- OpenAI-compatible provider entries configured under `openai-compatibility`, or native `opencode-enhancer` auth files (tested on unchanged CPA 8.0.43)
 
 ## Build
 
@@ -115,7 +115,7 @@ Then open **Free Model Sync** in CPA Management Center:
 
 Catalog refresh, save, and model-test outcomes are shown in a temporary toast; model-test detail is also shown below the checklist.
 
-Provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models`. The optional `managed` list stores only selected zero-priced models whose IDs do not contain a recognizable `free` token; it is required solely for safe ownership cleanup. No exclusion list is stored. A stopped provider is retained with `enabled: false`.
+Provider monitoring state is persisted under `plugins.configs.free-model-sync.monitors` in CPA's `config.yaml`. Free catalog results stay in page memory, and active selection is sourced from `openai-compatibility.models` or the native auth file's `models`. The optional `managed` list stores only selected zero-priced models whose IDs do not contain a recognizable `free` token; it is required solely for safe ownership cleanup. No exclusion list is stored. A stopped provider is retained with `enabled: false`.
 
 ## Model test verdicts
 
@@ -149,13 +149,13 @@ plugin.
 
 ## OpenCode Zen
 
-OpenCode needs two things no other provider does.
+OpenCode uses a separate request fingerprint and TLS profile.
 
-**Use the current free-tier endpoint.** As of October 2026, chat and catalog
-requests use `https://opencode.ai/inference/v1`. The older
-`/inference/openai/v1/chat/completions` endpoint rejects free-tier probes with
-`403 FreeTierError`. Catalog refresh still tries alternate OpenCode paths when
-the configured base URL has no model list.
+**Use the official inference endpoints.** Native credentials use
+`https://opencode.ai/inference/openai/v1` for chat and
+`https://opencode.ai/inference/v1/models` for the catalog. The legacy
+`https://opencode.ai/inference/v1` base is also accepted. Catalog refresh tries
+alternate OpenCode paths when the configured base URL has no model list.
 
 **The free tier is gated on the official client fingerprint.** A request missing
 any single part is refused with `403 FreeTierError`, so a healthy model would
@@ -164,16 +164,58 @@ look dead. Model tests against `opencode.ai` carry the whole fingerprint: the
 `ses_` session id in both `x-opencode-session` and `x-opencode-session-id`, a
 fresh `msg_` request id per call, `Accept: text/event-stream`, `stream: true`,
 and bash, glob, grep and read tool declarations with nonempty parameter schemas.
-The reply is then an event stream, which the plugin reads for completion
-chunks. Muse models use the Responses protocol with a 32-token budget and must
-emit response text plus a completed event. For chat models, a first chunk
-carrying only reasoning still counts, since reasoning models open with empty
-content.
+OpenCode probes also include this environment context as a system message for
+Chat Completions or `instructions` for Muse Responses:
 
-The proxy path is a separate matter: requests routed through CPA are shaped by
+```text
+<env>
+Working directory: not provided
+</env>
+```
+
+The plugin does not know the caller's working directory. Chat probes use a
+128-token budget so reasoning models have room for visible text; Muse Responses
+probes retain their 32-token budget. A chat probe passes
+only after nonempty text and `[DONE]`; a Muse probe needs nonempty response text
+and `response.completed`. Initial reasoning chunks are allowed, but reasoning,
+role-only chunks, and unfinished streams do not pass on their own.
+
+**Plugin-owned transport (2026-10-26).** Matched requests completed through Bun
+while standard Go TLS returned `429 FreeUsageLimitError`. OpenCode probes now
+use Go/uTLS v1.8.2 with Bun 1.4.4's measured ClientHello inside this plugin.
+The native auth monitor's catalog, real model probe, and selection save were
+tested on the unchanged CPA 8.0.43 binary. No CPA patch or relay is required.
+
+Client requests routed through CPA use the native executor in
 [cpa-opencode-enhancer](https://github.com/YogaSakti/cpa-opencode-enhancer),
-which this plugin's probe cannot use because `host.http.do` bypasses the
-executor pipeline.
+while this plugin sends its own catalog and test requests.
+
+### Native OpenCode auth sources
+
+Create a native credential using the enhancer's
+[setup instructions](https://github.com/YogaSakti/cpa-opencode-enhancer#4-add-a-native-free-chat-credential).
+Keep it as a root-level `.json` file in CPA's `auth-dir`; nested auth files are
+excluded because CPA's save API accepts root file names only. It appears in the
+provider picker and uses the same catalog, test, and save controls.
+
+The browser receives the source identity, selected models, and verdicts.
+The API key and custom auth headers are read server-side through `host.auth.get`.
+For native sources, the stored API key and official probe fingerprint take
+precedence over custom Authorization, User-Agent, session, and framing headers.
+Unrelated custom headers are retained.
+Saving preserves unknown JSON fields, the current key, and metadata on retained
+models. The fresh catalog validates the selected free IDs before writing.
+Responses-only Muse models are excluded from native Chat Completions sources.
+
+Native management routes under `/v0/management/plugins/free-model-sync/native/`
+are `GET list`, `POST plan`, `POST test`, and `PATCH save`. The latter three
+identify the credential by `auth_index`; the server rechecks the file identity
+on each request. Credential `proxy_url` takes priority over CPA's global proxy,
+then the process proxy environment. The page stops if it cannot read the global
+proxy rather than silently switching paths. Native catalog and probe attempts
+have a 45-second timeout and a 4 MiB response limit.
+
+Legacy compatibility entries remain supported:
 
 A provider entry looks like this:
 

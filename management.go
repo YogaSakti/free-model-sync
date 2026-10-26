@@ -46,10 +46,11 @@ type planRequest struct {
 }
 
 type modelTestRequest struct {
-	APIKey  string            `json:"api_key"`
-	BaseURL string            `json:"base_url"`
-	Headers map[string]string `json:"headers"`
-	Model   string            `json:"model"`
+	APIKey   string            `json:"api_key"`
+	BaseURL  string            `json:"base_url"`
+	Headers  map[string]string `json:"headers"`
+	Model    string            `json:"model"`
+	ProxyURL string            `json:"proxy_url"`
 }
 
 // chatProbe is the Chat Completions request the model test sends. Tools are
@@ -110,11 +111,19 @@ func handleManagementRegister() ([]byte, error) {
 			Method:      http.MethodPost,
 			Path:        managementTestPath,
 			Description: "Test a model from a provider",
+		}, {
+			Method: http.MethodGet, Path: nativePath + "list", Description: "List native OpenCode auth model sources",
+		}, {
+			Method: http.MethodPost, Path: nativePath + "plan", Description: "Fetch free models for a native OpenCode auth file",
+		}, {
+			Method: http.MethodPost, Path: nativePath + "test", Description: "Test a native OpenCode free model",
+		}, {
+			Method: http.MethodPatch, Path: nativePath + "save", Description: "Save selected free models in a native OpenCode auth file",
 		}},
 		Resources: []pluginapi.ResourceRoute{{
 			Path:        resourcePagePath,
 			Menu:        "Free Model Sync",
-			Description: "Monitor selected OpenAI-compatible providers and sync free models",
+			Description: "Monitor selected providers and native OpenCode auth files",
 		}},
 	})
 }
@@ -126,6 +135,7 @@ func handleManagement(raw []byte) ([]byte, error) {
 	}
 	method := strings.ToUpper(strings.TrimSpace(request.Method))
 	path := strings.TrimRight(strings.TrimSpace(request.Path), "/")
+	nativeRoute := strings.TrimPrefix(path, "/v0/management")
 	if len(request.Body) > maxManagementBodyBytes {
 		return okEnvelope(managementJSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"}))
 	}
@@ -137,6 +147,14 @@ func handleManagement(raw []byte) ([]byte, error) {
 		response = planManagementUpdate(request.HostCallbackID, request.Body)
 	case method == http.MethodPost && (path == managementTestPath || path == managementTestFullPath):
 		response = testManagementModel(request.HostCallbackID, request.Body)
+	case method == http.MethodGet && nativeRoute == nativePath+"list":
+		response = listNativeAuth()
+	case method == http.MethodPost && nativeRoute == nativePath+"plan":
+		response = planNativeAuth(request.HostCallbackID, request.Body)
+	case method == http.MethodPost && nativeRoute == nativePath+"test":
+		response = testNativeAuth(request.HostCallbackID, request.Body)
+	case method == http.MethodPatch && nativeRoute == nativePath+"save":
+		response = saveNativeAuth(request.HostCallbackID, request.Body)
 	default:
 		response = managementJSON(http.StatusNotFound, map[string]string{"error": "route not found"})
 	}
@@ -214,21 +232,25 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		MaxTokens: 8,
 	}
 	var fingerprint http.Header
-	if isOpenCodeURL(endpoint) {
+	openCode := isOpenCodeURL(endpoint)
+	if openCode {
 		// Zen answers 403 FreeTierError unless the client fingerprint, the
 		// stream flag and the tool quartet all arrive together.
 		fingerprint = openCodeHeaders()
+		probe.Messages = append([]chatMessage{{Role: "system", Content: openCodeEnvironment}}, probe.Messages...)
+		probe.MaxTokens = 128
 		probe.Stream = true
 		probe.Tools = openCodeToolSet()
 	}
 	var probeBody any = probe
-	if isOpenCodeURL(endpoint) && strings.HasPrefix(strings.ToLower(request.Model), "muse-") {
+	if openCode && strings.HasPrefix(strings.ToLower(request.Model), "muse-") {
 		endpoint, err = providerEndpoint(request.BaseURL, "responses")
 		if err != nil {
 			return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		probeBody = map[string]any{
 			"model":             request.Model,
+			"instructions":      openCodeEnvironment,
 			"input":             []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
 			"max_output_tokens": 32,
 			"stream":            true,
@@ -241,13 +263,19 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		return managementJSON(http.StatusInternalServerError, map[string]string{"error": "unable to create model test request"})
 	}
 	var upstream pluginapi.HTTPResponse
-	if err := hostCall(pluginabi.MethodHostHTTPDo, hostHTTPRequest{
+	upstreamRequest := hostHTTPRequest{
 		HostCallbackID: hostCallbackID,
 		Method:         http.MethodPost,
 		URL:            endpoint,
 		Headers:        providerHeaders(request.APIKey, request.Headers, "application/json", fingerprint),
 		Body:           payload,
-	}, &upstream); err != nil {
+	}
+	if openCode {
+		upstream, err = openCodeHTTPDo(openCodeContext, upstreamRequest, request.ProxyURL)
+	} else {
+		err = hostCall(pluginabi.MethodHostHTTPDo, upstreamRequest, &upstream)
+	}
+	if err != nil {
 		// The upstream error text can carry provider detail, so only the fact
 		// of the failure is reported. A request that never arrived says
 		// nothing about the model, so it is not marked unavailable.
