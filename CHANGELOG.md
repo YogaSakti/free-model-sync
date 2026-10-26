@@ -10,6 +10,13 @@
 * Monitor native `opencode-enhancer` auth files and preserve credentials, aliases, and unrelated fields when saving selected free chat models.
 * Respect credential and global proxy settings, reject unsafe auth file targets, and restore ownership tracking after failed saves.
 
+## [0.10.0](https://github.com/YogaSakti/free-model-sync/compare/v0.9.6...v0.10.0) (2026-10-26)
+
+
+### Features
+
+* monitor native OpenCode auth sources ([90b8a90](https://github.com/YogaSakti/free-model-sync/commit/90b8a90048b38f1ee311da02150fb15a1a2d592c))
+
 ## [0.9.6](https://github.com/YogaSakti/free-model-sync/compare/v0.9.5...v0.9.6) (2026-10-15)
 
 
