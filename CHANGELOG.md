@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/YogaSakti/free-model-sync/compare/v0.10.1...v0.11.0) (2026-10-26)
+
+
+### Features
+
+* edit native OpenCode model aliases ([1aa8b8d](https://github.com/YogaSakti/free-model-sync/commit/1aa8b8de4e866ca95befae9932f6e32330dbe2cf))
+
 ## [0.10.1](https://github.com/YogaSakti/free-model-sync/compare/v0.10.0...v0.10.1) (2026-10-26)
 
 
