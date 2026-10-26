@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
@@ -45,11 +46,12 @@ type nativeProviderRow struct {
 	Models     []modelConfig `json:"models"`
 }
 type nativeRequest struct {
-	AuthIndex string   `json:"auth_index"`
-	Managed   []string `json:"managed"`
-	Selected  []string `json:"selected"`
-	Model     string   `json:"model"`
-	ProxyURL  string   `json:"proxy_url"`
+	AuthIndex string            `json:"auth_index"`
+	Managed   []string          `json:"managed"`
+	Selected  []string          `json:"selected"`
+	Aliases   map[string]string `json:"aliases"`
+	Model     string            `json:"model"`
+	ProxyURL  string            `json:"proxy_url"`
 }
 
 func nativeEntries() ([]pluginapi.HostAuthFileEntry, error) {
@@ -252,6 +254,15 @@ func saveNativeAuth(hostCallbackID string, body []byte) pluginapi.ManagementResp
 	if err != nil {
 		return nativeError(status, err)
 	}
+	for name, alias := range request.Aliases {
+		if !selected[name] {
+			return nativeError(400, errors.New("alias changes require a selected model in the current free catalog"))
+		}
+		if strings.IndexFunc(alias, unicode.IsControl) >= 0 {
+			return nativeError(400, errors.New("model aliases must not contain control characters"))
+		}
+		request.Aliases[name] = strings.TrimSpace(alias)
+	}
 	var metadata map[string]json.RawMessage
 	if json.Unmarshal(file.JSON, &metadata) != nil {
 		return nativeError(502, errors.New("invalid native auth JSON"))
@@ -285,12 +296,44 @@ func saveNativeAuth(hostCallbackID string, body []byte) pluginapi.ManagementResp
 		if raw == nil {
 			raw, _ = json.Marshal(modelConfig{Name: name, Alias: defaultAlias(name)})
 		}
+		if alias, changed := request.Aliases[name]; changed {
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(raw, &fields) != nil || fields == nil {
+				return nativeError(502, errors.New("invalid native model configuration"))
+			}
+			if alias == "" {
+				delete(fields, "alias")
+			} else {
+				fields["alias"], _ = json.Marshal(alias)
+			}
+			raw, _ = json.Marshal(fields)
+		}
 		models = append(models, raw)
 		if !hasFreeToken(name) {
 			managed = append(managed, name)
 		}
 	}
 	metadata["models"], _ = json.Marshal(models)
+	var safeModels []modelConfig
+	if json.Unmarshal(metadata["models"], &safeModels) != nil {
+		return nativeError(502, errors.New("invalid native model configuration"))
+	}
+	seen := make(map[string]string, len(safeModels)*2)
+	for _, model := range safeModels {
+		name := strings.TrimSpace(model.Name)
+		if name == "" || strings.IndexFunc(model.Name+model.Alias, unicode.IsControl) >= 0 {
+			return nativeError(400, errors.New("invalid native model name or alias"))
+		}
+		for _, id := range []string{name, strings.TrimSpace(model.Alias)} {
+			if id == "" {
+				continue
+			}
+			if prior, exists := seen[id]; exists && prior != name {
+				return nativeError(400, errors.New("model names and aliases must not identify different models in this credential"))
+			}
+			seen[id] = name
+		}
+	}
 	updated, err := json.Marshal(metadata)
 	if err != nil {
 		return nativeError(500, errors.New("unable to encode native auth JSON"))
@@ -299,8 +342,6 @@ func saveNativeAuth(hostCallbackID string, body []byte) pluginapi.ManagementResp
 	if err := hostCall(pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{Name: file.Name, JSON: updated}, &saved); err != nil {
 		return nativeError(502, errors.New("unable to save native auth file"))
 	}
-	var safeModels []modelConfig
-	_ = json.Unmarshal(metadata["models"], &safeModels)
 	return managementJSON(200, map[string]any{"models": safeModels, "managed": managed})
 }
 

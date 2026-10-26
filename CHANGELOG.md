@@ -1,16 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Bug Fixes
-
-* Prefer IPv4 for direct OpenCode connections after matched tests isolated IPv6 429 rejection; preserve configured HTTP, HTTPS, and SOCKS proxy routing.
-* Include truthful environment context in OpenCode Chat Completions and Muse Responses probes.
-* Give OpenCode chat probes a 128-token budget and require visible text plus stream completion before reporting success.
-* Send OpenCode probes directly with plugin-owned Go/uTLS, without a CPA core patch or relay.
-* Monitor native `opencode-enhancer` auth files and preserve credentials, aliases, and unrelated fields when saving selected free chat models.
-* Respect credential and global proxy settings, reject unsafe auth file targets, and restore ownership tracking after failed saves.
-
 ## [0.10.1](https://github.com/YogaSakti/free-model-sync/compare/v0.10.0...v0.10.1) (2026-10-26)
 
 

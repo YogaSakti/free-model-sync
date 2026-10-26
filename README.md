@@ -108,7 +108,7 @@ Then open **Free Model Sync** in CPA Management Center:
 1. Existing providers with recognizable free models appear automatically.
 2. Choose another provider from **Add a provider...** if needed. Adding it starts monitoring and fetches its catalog immediately.
 3. Click **Refresh catalog** to fetch the latest free set again.
-4. Expand **Free models** and edit the checkbox draft.
+4. Expand **Free models** and edit the checkbox draft. Native OpenCode rows also have an **Alias** field; set the name clients should use, or leave it blank to expose only the upstream model ID.
 5. Use **Select all** or **Deselect all**, then click **Save selection** to update the provider config.
 6. Click **Test selected** to send a small chat request to each checked model and see the results, which are explained under [Model test verdicts](#model-test-verdicts). When none are checked, the button becomes **Test and select**; it tests every free model and checks only those that pass. These are real provider requests and may count toward provider quotas; testing does not save the selection.
 7. Click **Stop monitoring** to remove a provider from the monitored cards without changing its configured model list. It remains available in **Add a provider...**.
@@ -204,6 +204,14 @@ Keep it as a root-level `.json` file in CPA's `auth-dir`; nested auth files are
 excluded because CPA's save API accepts root file names only. It appears in the
 provider picker and uses the same catalog, test, and save controls.
 
+Native rows provide an **Alias** text field next to each model. Aliases are
+editable drafts until **Save selection**; catalog refreshes keep those drafts.
+No `opencode-free/` prefix is required. For example, set the alias of
+`nemotron-3.5-super-vl-free` to `nemotron-3.5-super-vl` or another name of your
+choice. A blank alias keeps only the canonical upstream ID. Aliases cannot
+conflict with another model's name or alias within the same credential.
+Shared aliases across providers retain CPA's normal provider selection.
+
 The browser receives the source identity, selected models, and verdicts.
 The API key and custom auth headers are read server-side through `host.auth.get`.
 For native sources, the stored API key and official probe fingerprint take
@@ -216,7 +224,10 @@ Responses-only Muse models are excluded from native Chat Completions sources.
 Native management routes under `/v0/management/plugins/free-model-sync/native/`
 are `GET list`, `POST plan`, `POST test`, and `PATCH save`. The latter three
 identify the credential by `auth_index`; the server rechecks the file identity
-on each request. Credential `proxy_url` takes priority over CPA's global proxy,
+on each request. `PATCH save` accepts optional `aliases` patches keyed by
+selected upstream model ID, for example
+`"aliases":{"nemotron-3.5-super-vl-free":"nemotron-3.5-super-vl"}`. An omitted
+alias is preserved; an empty string clears it. Credential `proxy_url` takes priority over CPA's global proxy,
 then the process proxy environment. The page stops if it cannot read the global
 proxy rather than silently switching paths. Native catalog and probe attempts
 have a 45-second timeout and a 4 MiB response limit.

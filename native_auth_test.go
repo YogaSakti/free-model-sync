@@ -13,7 +13,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-const nativeFixture = `{"type":"opencode-enhancer","api_key":"private-test-key","base_url":"https://opencode.ai/inference/openai/v1","proxy_url":"socks5://credential:1080","headers":{"X-Private":"private-header"},"weight":7,"metadata":{"keep":true},"models":[{"name":"manual-paid","alias":"manual","custom":"keep"},{"name":"old-free","alias":"old"},{"name":"current-free","alias":"my-alias","custom":"keep-too"},{"name":"zero-price","alias":"zero"}]}`
+const nativeFixture = `{"type":"opencode-enhancer","api_key":"private-test-key","base_url":"https://opencode.ai/inference/openai/v1","proxy_url":"socks5://credential:1080","headers":{"X-Private":"private-header"},"priority":5,"weight":7,"metadata":{"keep":true},"models":[{"name":"manual-paid","alias":"manual","custom":"keep"},{"name":"old-free","alias":"old"},{"name":"current-free","alias":"my-alias","custom":"keep-too"},{"name":"zero-price","alias":"zero"}]}`
 
 func stubNativeAuth(t *testing.T, raw string) *json.RawMessage {
 	t.Helper()
@@ -91,7 +91,7 @@ func TestNativeListKeepsCredentialsServerSide(t *testing.T) {
 
 func TestNativeSavePreservesCredentialsManualModelsAndUnknownFields(t *testing.T) {
 	saved := stubNativeAuth(t, nativeFixture)
-	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","managed":["zero-price"],"selected":["current-free","new-free"]}`))
+	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","managed":["zero-price"],"selected":["current-free","new-free"],"aliases":{"current-free":" short-name ","new-free":"team/模型 alias"}}`))
 	if response.StatusCode != 200 {
 		t.Fatalf("status %d: %s", response.StatusCode, response.Body)
 	}
@@ -99,7 +99,7 @@ func TestNativeSavePreservesCredentialsManualModelsAndUnknownFields(t *testing.T
 	if err := json.Unmarshal(*saved, &body); err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"api_key":"private-test-key"`, `"weight":7`, `"metadata":{"keep":true}`, `"proxy_url":"socks5://credential:1080"`, `"custom":"keep-too"`, `"alias":"my-alias"`, `"custom":"keep"`} {
+	for _, expected := range []string{`"api_key":"private-test-key"`, `"priority":5`, `"weight":7`, `"metadata":{"keep":true}`, `"proxy_url":"socks5://credential:1080"`, `"headers":{"X-Private":"private-header"}`, `"custom":"keep-too"`, `"alias":"short-name"`, `"alias":"team/模型 alias"`, `"custom":"keep"`} {
 		if !bytes.Contains(*saved, []byte(expected)) {
 			t.Fatalf("saved JSON missing %s: %s", expected, *saved)
 		}
@@ -129,13 +129,101 @@ func TestNativeSavePreservesKeyRotatedDuringCatalogFetch(t *testing.T) {
 			if reads > 1 {
 				file := result.(*nativeAuthFile)
 				file.JSON = json.RawMessage(strings.ReplaceAll(string(file.JSON), "private-test-key", "rotated-key"))
+				file.JSON = json.RawMessage(strings.ReplaceAll(string(file.JSON), "my-alias", "latest-alias"))
+			}
+		}
+		return nil
+	}
+	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","selected":["current-free","new-free"],"aliases":{"new-free":" fresh "}}`))
+	if response.StatusCode != 200 || !bytes.Contains(*saved, []byte(`"api_key":"rotated-key"`)) || !bytes.Contains(*saved, []byte(`"alias":"latest-alias"`)) || !bytes.Contains(*saved, []byte(`"alias":"fresh"`)) {
+		t.Fatalf("save lost the latest credential/alias or normalized alias patch: status %d", response.StatusCode)
+	}
+}
+
+func TestNativeSaveClearsAliasForCanonicalOnlyModel(t *testing.T) {
+	saved := stubNativeAuth(t, nativeFixture)
+	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","selected":["current-free"],"aliases":{"current-free":"  "}}`))
+	if response.StatusCode != 200 {
+		t.Fatalf("status %d: %s", response.StatusCode, response.Body)
+	}
+	var body struct {
+		Models []map[string]json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(*saved, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range body.Models {
+		if string(model["name"]) == `"current-free"` {
+			if _, exists := model["alias"]; exists || string(model["custom"]) != `"keep-too"` {
+				t.Fatal("clearing an alias must retain the model metadata and only publish its canonical name")
+			}
+			return
+		}
+	}
+	t.Fatal("selected canonical model was removed")
+}
+
+func TestNativeSaveAllowsAliasEqualToItsOwnCanonicalName(t *testing.T) {
+	saved := stubNativeAuth(t, nativeFixture)
+	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","selected":["current-free"],"aliases":{"current-free":"current-free"}}`))
+	if response.StatusCode != 200 || !bytes.Contains(*saved, []byte(`"alias":"current-free"`)) {
+		t.Fatalf("an alias for the same canonical model was rejected: status %d", response.StatusCode)
+	}
+}
+
+func TestNativeSaveRejectsAliasForDeselectedCatalogModel(t *testing.T) {
+	saved := stubNativeAuth(t, nativeFixture)
+	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","selected":["current-free"],"aliases":{"new-free":"alias"}}`))
+	if response.StatusCode != 400 || len(*saved) != 0 {
+		t.Fatalf("an alias for a deselected catalog model was written: status %d", response.StatusCode)
+	}
+}
+
+func TestNativeSaveRejectsInvalidAliasPatchesWithoutWriting(t *testing.T) {
+	for name, aliases := range map[string]map[string]string{
+		"unknown model":      {"unknown-free": "alias"},
+		"deselected model":   {"old-free": "alias"},
+		"line break":         {"current-free": "alias\n"},
+		"control character":  {"current-free": "alias\x00"},
+		"duplicate alias":    {"current-free": "shared", "new-free": "shared"},
+		"selected canonical": {"current-free": "new-free"},
+		"manual alias":       {"current-free": "manual"},
+		"manual canonical":   {"current-free": "manual-paid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			saved := stubNativeAuth(t, nativeFixture)
+			body, err := json.Marshal(map[string]any{"auth_index": "native-1", "selected": []string{"current-free", "new-free"}, "aliases": aliases})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := saveNativeAuth("callback", body)
+			if response.StatusCode != 400 || len(*saved) != 0 {
+				t.Fatalf("invalid aliases were written: status %d", response.StatusCode)
+			}
+		})
+	}
+}
+
+func TestNativeSaveValidatesAliasesFromLatestFileBeforeWriting(t *testing.T) {
+	saved := stubNativeAuth(t, nativeFixture)
+	previous := hostCall
+	reads := 0
+	hostCall = func(method string, request any, result any) error {
+		if err := previous(method, request, result); err != nil {
+			return err
+		}
+		if method == pluginabi.MethodHostAuthGet {
+			reads++
+			if reads > 1 {
+				file := result.(*nativeAuthFile)
+				file.JSON = json.RawMessage(strings.Replace(string(file.JSON), `"alias":"manual"`, `"alias":"new-free"`, 1))
 			}
 		}
 		return nil
 	}
 	response := saveNativeAuth("callback", []byte(`{"auth_index":"native-1","selected":["new-free"]}`))
-	if response.StatusCode != 200 || !bytes.Contains(*saved, []byte(`"api_key":"rotated-key"`)) {
-		t.Fatalf("save replaced newly rotated key: status %d", response.StatusCode)
+	if response.StatusCode != 400 || len(*saved) != 0 {
+		t.Fatalf("latest alias/canonical ambiguity was written: status %d", response.StatusCode)
 	}
 }
 
