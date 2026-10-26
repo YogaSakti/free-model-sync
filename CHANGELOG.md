@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+* Prefer IPv4 for direct OpenCode connections after matched tests isolated IPv6 429 rejection; preserve configured HTTP, HTTPS, and SOCKS proxy routing.
 * Include truthful environment context in OpenCode Chat Completions and Muse Responses probes.
 * Give OpenCode chat probes a 128-token budget and require visible text plus stream completion before reporting success.
 * Send OpenCode probes directly with plugin-owned Go/uTLS, without a CPA core patch or relay.

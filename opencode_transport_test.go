@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,39 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
+
+func TestOpenCodeTransportUsesIPv4OnlyForDirectOfficialHost(t *testing.T) {
+	for _, test := range []struct{ name, proxyURL, host, network string }{
+		{"default-direct", "", "opencode.ai", "tcp4"},
+		{"explicit-direct", "direct", "OPENCODE.AI", "tcp4"},
+		{"explicit-none", "none", "opencode.ai", "tcp4"},
+		{"other-host", "direct", "example.test", "tcp"},
+		{"http-proxy", "http://127.0.0.1:8080", "opencode.ai", "tcp"},
+		{"https-proxy", "https://127.0.0.1:8080", "opencode.ai", "tcp"},
+		{"socks-proxy", "socks5://127.0.0.1:1080", "opencode.ai", "tcp"},
+		{"socks-hostname-proxy", "socks5h://127.0.0.1:1080", "opencode.ai", "tcp"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			transport, err := newOpenCodeTransport(test.proxyURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer transport.CloseIdleConnections()
+			gotNetwork, gotAddress := "", ""
+			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				gotNetwork, gotAddress = network, address
+				return nil, ctx.Err()
+			}
+			// Cancel before dialing so even the unfixed code cannot contact a host.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err = transport.DialTLSContext(ctx, "tcp", test.host+":443")
+			if !errors.Is(err, context.Canceled) || gotNetwork != test.network || gotAddress != test.host+":443" {
+				t.Fatalf("dial network=%q address=%q err=%v; want %q", gotNetwork, gotAddress, err, test.network)
+			}
+		})
+	}
+}
 
 func TestOpenCodeProbeDoesNotUseHostTransport(t *testing.T) {
 	previous := hostCall

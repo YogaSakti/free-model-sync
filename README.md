@@ -183,6 +183,12 @@ role-only chunks, and unfinished streams do not pass on their own.
 **Plugin-owned transport (2026-10-26).** Matched requests completed through Bun
 while standard Go TLS returned `429 FreeUsageLimitError`. OpenCode probes now
 use Go/uTLS v1.8.2 with Bun 1.4.4's measured ClientHello inside this plugin.
+Further matched tests isolated an address-family difference: the same Go/uTLS
+request returned `429 FreeUsageLimitError` over IPv6 and completed with visible
+text and `[DONE]` over IPv4. Direct connections to the official OpenCode hostname
+therefore resolve through IPv4 without pinning an IP address. Explicit HTTP,
+HTTPS, and SOCKS proxies retain their own routing and cancellation behavior.
+This 429 response alone is not proof that the credential's quota is exhausted.
 The native auth monitor's catalog, real model probe, and selection save were
 tested on the unchanged CPA 8.0.43 binary. No CPA patch or relay is required.
 

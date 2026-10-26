@@ -69,7 +69,7 @@ func doOpenCodeHTTPRequest(ctx context.Context, request hostHTTPRequest, proxyUR
 }
 
 func newOpenCodeTransport(proxyURL string) (*http.Transport, error) {
-	dialer, _, err := proxyutil.BuildDialer(proxyURL)
+	dialer, mode, err := proxyutil.BuildDialer(proxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +82,20 @@ func newOpenCodeTransport(proxyURL string) (*http.Transport, error) {
 		}
 	}
 	transport := &http.Transport{TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: 30 * time.Second}
+	transport.DialContext = forward.DialContext
 	// Bun 1.4.4 advertises only HTTP/1.1; keep net/http from adding HTTP/2.
 	transport.TLSNextProto = make(map[string]func(string, *stdtls.Conn) http.RoundTripper)
 	transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		conn, err := forward.DialContext(ctx, network, addr)
+		host, _, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-		host, _, err := net.SplitHostPort(addr)
+		// The verified OpenCode IPv6 route rejects requests; proxies keep their own routing.
+		if mode != proxyutil.ModeProxy && network == "tcp" && strings.EqualFold(host, openCodeHost) {
+			network = "tcp4"
+		}
+		conn, err := transport.DialContext(ctx, network, addr)
 		if err != nil {
-			_ = conn.Close()
 			return nil, err
 		}
 		config := &tls.Config{ServerName: host}
