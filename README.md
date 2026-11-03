@@ -159,23 +159,29 @@ alternate OpenCode paths when the configured base URL has no model list.
 
 **The free tier is gated on the official client fingerprint.** A request missing
 any single part is refused with `403 FreeTierError`, so a healthy model would
-look dead. Model tests against `opencode.ai` carry the whole fingerprint: the
-`opencode/1.18.31` User-Agent, `x-opencode-client`, `x-opencode-project`, a
-`ses_` session id in both `x-opencode-session` and `x-opencode-session-id`, a
-fresh `msg_` request id per call, `Accept: text/event-stream`, `stream: true`,
-and bash, glob, grep and read tool declarations with nonempty parameter schemas.
+look dead. Model tests against `opencode.ai` use the OpenCode 2.2.5 CLI profile:
+`opencode/latest/2.2.5/cli`, `x-opencode-client: cli`, a stable hashed project ID,
+and a fresh inverted-timestamp `ses_` ID shared by `x-opencode-session`,
+`x-opencode-session-id`, `x-session-affinity`, and `x-session-id`. Each probe has
+matching B3/W3C traces and `Accept: application/json, text/event-stream`; the
+obsolete `x-opencode-request` header is removed even when configured. Generated
+fingerprint headers take precedence over stale custom values.
+Streaming probes declare edit, glob, grep, read, and shell with typed parameter
+schemas and `strict: false`. These compatibility tools are marked unavailable
+and are never executed. Chat probes request usage in their stream options.
 OpenCode probes also include this environment context as a system message for
 Chat Completions or `instructions` for Muse Responses:
 
 ```text
+You are a coding agent.
 <env>
-Working directory: not provided
+Working directory: <plugin process working directory>
 </env>
 ```
 
-The plugin does not know the caller's working directory. Chat probes use a
-128-token budget so reasoning models have room for visible text; Muse Responses
-probes retain their 32-token budget. A chat probe passes
+The working directory describes the plugin process, with `/workspace` as a
+fallback if it cannot be read. Chat and Muse Responses probes use a 128-token
+budget so reasoning models have room for visible text. A chat probe passes
 only after nonempty text and `[DONE]`; a Muse probe needs nonempty response text
 and `response.completed`. Initial reasoning chunks are allowed, but reasoning,
 role-only chunks, and unfinished streams do not pass on their own.

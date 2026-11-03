@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -17,7 +18,6 @@ import (
 
 var (
 	sessionIDPattern = regexp.MustCompile(`^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$`)
-	requestIDPattern = regexp.MustCompile(`^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$`)
 )
 
 type probeBody struct {
@@ -100,10 +100,14 @@ func TestMuseProbeUsesResponsesProtocol(t *testing.T) {
 	if len(body.Input) == 0 || body.MaxOutputTokens < 32 || body.Store == nil || *body.Store || !body.Stream {
 		t.Fatalf("Muse request missing Responses fields: %s", got.Body)
 	}
-	if body.Instructions != "<env>\nWorking directory: not provided\n</env>" {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body.Instructions != "You are a coding agent.\n<env>\nWorking directory: "+cwd+"\n</env>" {
 		t.Errorf("instructions = %q, want an honest environment context", body.Instructions)
 	}
-	if len(body.Tools) != len(openCodeTools) || len(body.Tools[0].Parameters.Properties) == 0 {
+	if len(body.Tools) != 5 || len(body.Tools[0].Parameters.Properties) == 0 {
 		t.Fatalf("Muse tool declarations = %#v", body.Tools)
 	}
 }
@@ -138,16 +142,16 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 		t.Errorf("URL = %q", got.URL)
 	}
 
-	if ua := got.Headers.Get("User-Agent"); ua != "opencode/1.18.31" {
+	if ua := got.Headers.Get("User-Agent"); ua != "opencode/latest/2.2.5/cli" {
 		t.Errorf("User-Agent = %q", ua)
 	}
-	if client := got.Headers.Get("X-Opencode-Client"); client != "desktop" {
+	if client := got.Headers.Get("X-Opencode-Client"); client != "cli" {
 		t.Errorf("X-Opencode-Client = %q", client)
 	}
-	if project := got.Headers.Get("X-Opencode-Project"); project != "global" {
+	if project := got.Headers.Get("X-Opencode-Project"); !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(project) {
 		t.Errorf("X-Opencode-Project = %q", project)
 	}
-	if accept := got.Headers.Get("Accept"); accept != "text/event-stream" {
+	if accept := got.Headers.Get("Accept"); accept != "application/json, text/event-stream" {
 		t.Errorf("Accept = %q", accept)
 	}
 	if session := got.Headers.Get("X-Opencode-Session"); !sessionIDPattern.MatchString(session) {
@@ -156,8 +160,8 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 	if got.Headers.Get("X-Opencode-Session-Id") != got.Headers.Get("X-Opencode-Session") {
 		t.Error("X-Opencode-Session-Id must match X-Opencode-Session")
 	}
-	if requestID := got.Headers.Get("X-Opencode-Request"); !requestIDPattern.MatchString(requestID) {
-		t.Errorf("X-Opencode-Request = %q", requestID)
+	if requestID := got.Headers.Get("X-Opencode-Request"); requestID != "" {
+		t.Errorf("obsolete X-Opencode-Request = %q", requestID)
 	}
 
 	var payload probeBody
@@ -172,12 +176,12 @@ func TestOpenCodeProbeSendsClientFingerprint(t *testing.T) {
 		if tool.Type != "function" || tool.Function.Parameters.Type != "object" {
 			t.Errorf("tool = %#v", tool)
 		}
-		if (tool.Function.Name == "bash" || tool.Function.Name == "read") && len(tool.Function.Parameters.Properties) == 0 {
+		if len(tool.Function.Parameters.Properties) == 0 {
 			t.Errorf("%s tool has an empty parameter schema", tool.Function.Name)
 		}
 		names[tool.Function.Name] = tool.Type
 	}
-	for _, want := range []string{"bash", "glob", "grep", "read"} {
+	for _, want := range []string{"edit", "glob", "grep", "read", "shell"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("tools missing %q, got %v", want, names)
 		}
@@ -194,8 +198,12 @@ func TestOpenCodeProbeIncludesEnvironmentContext(t *testing.T) {
 	if err := json.Unmarshal(got.Body, &body); err != nil {
 		t.Fatal(err)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []chatMessage{
-		{Role: "system", Content: "<env>\nWorking directory: not provided\n</env>"},
+		{Role: "system", Content: "You are a coding agent.\n<env>\nWorking directory: " + cwd + "\n</env>"},
 		{Role: "user", Content: "Reply with OK."},
 	}
 	if !reflect.DeepEqual(body.Messages, want) {
@@ -206,17 +214,17 @@ func TestOpenCodeProbeIncludesEnvironmentContext(t *testing.T) {
 	}
 }
 
-func TestOpenCodeProbeUsesAFreshRequestIDPerCall(t *testing.T) {
+func TestOpenCodeProbeUsesAFreshSessionPerCall(t *testing.T) {
 	got := stubUpstream(t, eventStreamResponse())
 	body := []byte(`{"base_url":"https://opencode.ai/zen/v1","model":"mimo-v2.5-free"}`)
 
 	callModelTestEndpoint(t, body)
-	first := got.Headers.Get("X-Opencode-Request")
+	first := got.Headers.Get("X-Opencode-Session")
 	callModelTestEndpoint(t, body)
-	second := got.Headers.Get("X-Opencode-Request")
+	second := got.Headers.Get("X-Opencode-Session")
 
 	if first == "" || first == second {
-		t.Fatalf("request ids = %q and %q, want two different ids", first, second)
+		t.Fatalf("sessions = %q and %q, want two different ids", first, second)
 	}
 }
 
@@ -437,19 +445,13 @@ func TestOpenCodeIDCarriesTheOfficialShape(t *testing.T) {
 	seen := make(map[string]struct{}, 200)
 	for i := 0; i < 100; i++ {
 		session := openCodeID(openCodeSessionPrefix)
-		request := openCodeID(openCodeRequestPrefix)
 		if !sessionIDPattern.MatchString(session) {
 			t.Fatalf("session id = %q", session)
 		}
-		if !requestIDPattern.MatchString(request) {
-			t.Fatalf("request id = %q", request)
+		if _, clash := seen[session]; clash {
+			t.Fatalf("session %q repeated", session)
 		}
-		for _, id := range []string{session, request} {
-			if _, clash := seen[id]; clash {
-				t.Fatalf("id %q repeated", id)
-			}
-			seen[id] = struct{}{}
-		}
+		seen[session] = struct{}{}
 	}
 }
 
@@ -464,29 +466,6 @@ func TestOpenCodeSessionIDEncodesInvertedCurrentTime(t *testing.T) {
 	current := ^encoded & 0xFFFFFFFFFFFF
 	if milli := int64(current >> 12); milli < before&0xFFFFFFFFF || milli > after&0xFFFFFFFFF || current&0xFFF != 1 {
 		t.Errorf("session time = %x, want a current millisecond with counter 1", current)
-	}
-}
-
-func TestOpenCodeHeadersDeclareEveryGate(t *testing.T) {
-	headers := openCodeHeaders()
-	for name, want := range map[string]string{
-		"User-Agent":         "opencode/1.18.31",
-		"Accept":             "text/event-stream",
-		"X-Opencode-Client":  "desktop",
-		"X-Opencode-Project": "global",
-	} {
-		if got := headers.Get(name); got != want {
-			t.Errorf("%s = %q, want %q", name, got, want)
-		}
-	}
-	if !sessionIDPattern.MatchString(headers.Get("X-Opencode-Session")) {
-		t.Errorf("X-Opencode-Session = %q", headers.Get("X-Opencode-Session"))
-	}
-	if headers.Get("X-Opencode-Session-Id") != headers.Get("X-Opencode-Session") {
-		t.Error("X-Opencode-Session-Id must match X-Opencode-Session")
-	}
-	if !requestIDPattern.MatchString(headers.Get("X-Opencode-Request")) {
-		t.Errorf("X-Opencode-Request = %q", headers.Get("X-Opencode-Request"))
 	}
 }
 

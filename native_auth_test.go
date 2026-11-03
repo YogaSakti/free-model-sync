@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -308,7 +309,7 @@ func TestNativeProbeUsesServerCredentialAndCredentialProxy(t *testing.T) {
 }
 
 func TestNativeHeadersKeepCredentialAndFingerprintAuthoritative(t *testing.T) {
-	raw := strings.Replace(nativeFixture, `"headers":{"X-Private":"private-header"}`, `"headers":{"X-Private":"private-header","authorization":"Bearer wrong-key","User-Agent":"wrong-agent","Accept":"text/plain","Content-Type":"text/plain","X-Opencode-Client":"wrong-client","X-Opencode-Project":"wrong-project","X-Opencode-Session":"wrong-session","X-Opencode-Session-Id":"wrong-session","X-Opencode-Request":"wrong-request","X-CPA-OpenCode-Execution-ID":"internal-id","Connection":"close"}`, 1)
+	raw := strings.Replace(nativeFixture, `"headers":{"X-Private":"private-header"}`, `"headers":{"X-Private":"private-header","authorization":"Bearer wrong-key","User-Agent":"wrong-agent","Accept":"text/plain","Content-Type":"text/plain","X-Opencode-Client":"wrong-client","X-Opencode-Project":"wrong-project","X-Opencode-Session":"wrong-session","X-Opencode-Session-Id":"wrong-session","X-Session-Affinity":"wrong-session","X-Session-Id":"wrong-session","B3":"wrong-trace","Traceparent":"wrong-trace","X-Opencode-Request":"wrong-request","X-CPA-OpenCode-Execution-ID":"internal-id","Connection":"close"}`, 1)
 	stubNativeAuth(t, raw)
 	seenCatalog, seenProbe := false, false
 	openCodeHTTPDo = func(_ context.Context, request hostHTTPRequest, _ string) (pluginapi.HTTPResponse, error) {
@@ -323,14 +324,20 @@ func TestNativeHeadersKeepCredentialAndFingerprintAuthoritative(t *testing.T) {
 			return pluginapi.HTTPResponse{StatusCode: 200, Body: []byte(`{"data":[{"id":"current-free"}]}`)}, nil
 		}
 		seenProbe = true
-		for name, want := range map[string]string{"User-Agent": openCodeUserAgent, "Accept": openCodeAccept, "Content-Type": "application/json", "X-Opencode-Client": openCodeClient, "X-Opencode-Project": openCodeProject} {
+		for name, want := range map[string]string{"User-Agent": "opencode/latest/2.2.5/cli", "Accept": "application/json, text/event-stream", "Content-Type": "application/json", "X-Opencode-Client": "cli"} {
 			if request.Headers.Get(name) != want {
 				t.Fatalf("native fingerprint header %s = %q", name, request.Headers.Get(name))
 			}
 		}
+		if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(request.Headers.Get("X-Opencode-Project")) {
+			t.Fatal("native probe must use a hashed project identity")
+		}
 		session := request.Headers.Get("X-Opencode-Session")
-		if !strings.HasPrefix(session, "ses_") || request.Headers.Get("X-Opencode-Session-Id") != session || !strings.HasPrefix(request.Headers.Get("X-Opencode-Request"), "msg_") {
+		if !sessionIDPattern.MatchString(session) || request.Headers.Get("X-Opencode-Session-Id") != session || request.Headers.Get("X-Session-Id") != session || request.Headers.Get("X-Session-Affinity") != session || request.Headers.Get("X-Opencode-Request") != "" {
 			t.Fatal("native generated fingerprint was overridden")
+		}
+		if !regexp.MustCompile(`^[0-9a-f]{32}-[0-9a-f]{16}-1-[0-9a-f]{16}$`).MatchString(request.Headers.Get("B3")) || !regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`).MatchString(request.Headers.Get("Traceparent")) {
+			t.Fatal("native generated traces were overridden")
 		}
 		return pluginapi.HTTPResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/event-stream"}}, Body: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n")}, nil
 	}

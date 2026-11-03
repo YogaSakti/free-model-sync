@@ -177,7 +177,7 @@ func nativeCustomHeaders(custom map[string]string) map[string]string {
 	for name, value := range custom {
 		// The native executor owns credentials, its fingerprint, and HTTP framing.
 		switch strings.ToLower(strings.TrimSpace(name)) {
-		case "authorization", "user-agent", "accept", "content-type", "x-opencode-client", "x-opencode-project", "x-opencode-session", "x-opencode-session-id", "x-opencode-request", "x-cpa-opencode-execution-id", "host", "content-length", "transfer-encoding", "proxy-authorization", "proxy-connection", "connection", "keep-alive", "trailer", "upgrade":
+		case "authorization", "user-agent", "accept", "content-type", "x-opencode-client", "x-opencode-project", "x-opencode-session", "x-opencode-session-id", "x-session-affinity", "x-session-id", "b3", "traceparent", "x-opencode-request", "x-cpa-opencode-execution-id", "host", "content-length", "transfer-encoding", "proxy-authorization", "proxy-connection", "connection", "keep-alive", "trailer", "upgrade":
 			continue
 		}
 		headers[name] = value

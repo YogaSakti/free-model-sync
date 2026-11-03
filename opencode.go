@@ -9,33 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YogaSakti/free-model-sync/internal/opencodefingerprint"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-// OpenCode Zen gates its free tier on the whole official-client fingerprint:
-// a request missing any single part is answered with 403 FreeTierError. The
-// probe reaches upstream through host.http.do, which bypasses the executor
-// pipeline, so the opencode-enhancer plugin never gets to add the fingerprint
-// and a healthy model would look dead and be pruned from config.yaml.
-//
-// Values follow plugin/fingerprint.go in
-// github.com/YogaSakti/cpa-opencode-enhancer, which applies the same
-// fingerprint on the path this probe skips.
+// Probes use this plugin's transport and bypass the native executor, so the
+// mirrored fingerprint helper keeps both plugins on the same client profile.
 const (
 	openCodeHost          = "opencode.ai"
-	openCodeUserAgent     = "opencode/1.18.31" // upstream rejects anything below 1.17
-	openCodeClient        = "desktop"
-	openCodeProject       = "global"
-	openCodeAccept        = "text/event-stream"
 	openCodeSessionPrefix = "ses_"
-	openCodeRequestPrefix = "msg_"
-	openCodeEnvironment   = "<env>\nWorking directory: not provided\n</env>"
 	base62Alphabet        = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
-
-// openCodeTools is the tool quartet the official client always declares.
-// Upstream reads its presence as part of the fingerprint.
-var openCodeTools = []string{"bash", "glob", "grep", "read"}
 
 // isOpenCodeURL reports whether an endpoint belongs to OpenCode Zen.
 func isOpenCodeURL(endpoint string) bool {
@@ -47,19 +31,9 @@ func isOpenCodeURL(endpoint string) bool {
 	return host == openCodeHost || strings.HasSuffix(host, "."+openCodeHost)
 }
 
-// openCodeHeaders returns the client fingerprint for one probe. The request id
-// is fresh per call, matching the official client.
+// Every probe is a fresh conversation with request-scoped trace IDs.
 func openCodeHeaders() http.Header {
-	headers := make(http.Header)
-	headers.Set("User-Agent", openCodeUserAgent)
-	headers.Set("Accept", openCodeAccept)
-	headers.Set("X-Opencode-Client", openCodeClient)
-	headers.Set("X-Opencode-Project", openCodeProject)
-	session := openCodeID(openCodeSessionPrefix)
-	headers.Set("X-Opencode-Session", session)
-	headers.Set("X-Opencode-Session-Id", session)
-	headers.Set("X-Opencode-Request", openCodeID(openCodeRequestPrefix))
-	return headers
+	return opencodefingerprint.Headers(openCodeID(openCodeSessionPrefix), "")
 }
 
 // openCodeID renders the official client's id shape. Session timestamps sort
@@ -85,16 +59,18 @@ func openCodeID(prefix string) string {
 	return out.String()
 }
 
-// openCodeToolSet declares the tool quartet in Chat Completions shape.
+// The compatibility tools are declarations only; probes never execute them.
 func openCodeToolSet() []chatTool {
-	tools := make([]chatTool, 0, len(openCodeTools))
-	for _, name := range openCodeTools {
+	names := opencodefingerprint.ToolNames()
+	tools := make([]chatTool, 0, len(names))
+	for _, name := range names {
 		tools = append(tools, chatTool{
 			Type: "function",
 			Function: chatToolFunction{
 				Name:        name,
-				Description: "OpenCode built-in " + name + " tool",
-				Parameters:  chatToolParameters{Type: "object", Properties: map[string]any{"value": map[string]any{"type": "string"}}},
+				Description: opencodefingerprint.ToolDescription,
+				Parameters:  opencodefingerprint.ToolSchema(name),
+				Strict:      false,
 			},
 		})
 	}
@@ -103,12 +79,14 @@ func openCodeToolSet() []chatTool {
 
 // Muse's free models accept Responses requests rather than Chat Completions.
 func openCodeResponseToolSet() []map[string]any {
-	tools := make([]map[string]any, 0, len(openCodeTools))
-	for _, name := range openCodeTools {
+	names := opencodefingerprint.ToolNames()
+	tools := make([]map[string]any, 0, len(names))
+	for _, name := range names {
 		tools = append(tools, map[string]any{
 			"type": "function", "name": name,
-			"description": "OpenCode built-in " + name + " tool",
-			"parameters":  map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}},
+			"description": opencodefingerprint.ToolDescription,
+			"parameters":  opencodefingerprint.ToolSchema(name),
+			"strict":      false,
 		})
 	}
 	return tools

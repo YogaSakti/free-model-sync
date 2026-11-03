@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/YogaSakti/free-model-sync/internal/opencodefingerprint"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
@@ -57,11 +58,12 @@ type modelTestRequest struct {
 // declared only where a provider gates on them; the field is omitted
 // otherwise, leaving the probe as it always was.
 type chatProbe struct {
-	Model     string        `json:"model"`
-	Messages  []chatMessage `json:"messages"`
-	MaxTokens int           `json:"max_tokens"`
-	Stream    bool          `json:"stream"`
-	Tools     []chatTool    `json:"tools,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []chatMessage   `json:"messages"`
+	MaxTokens     int             `json:"max_tokens"`
+	Stream        bool            `json:"stream"`
+	Tools         []chatTool      `json:"tools,omitempty"`
+	StreamOptions map[string]bool `json:"stream_options,omitempty"`
 }
 
 type chatMessage struct {
@@ -75,14 +77,10 @@ type chatTool struct {
 }
 
 type chatToolFunction struct {
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Parameters  chatToolParameters `json:"parameters"`
-}
-
-type chatToolParameters struct {
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Strict      bool           `json:"strict"`
 }
 
 type planResponse struct {
@@ -234,13 +232,12 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 	var fingerprint http.Header
 	openCode := isOpenCodeURL(endpoint)
 	if openCode {
-		// Zen answers 403 FreeTierError unless the client fingerprint, the
-		// stream flag and the tool quartet all arrive together.
 		fingerprint = openCodeHeaders()
-		probe.Messages = append([]chatMessage{{Role: "system", Content: openCodeEnvironment}}, probe.Messages...)
+		probe.Messages = append([]chatMessage{{Role: "system", Content: opencodefingerprint.Environment()}}, probe.Messages...)
 		probe.MaxTokens = 128
 		probe.Stream = true
 		probe.Tools = openCodeToolSet()
+		probe.StreamOptions = map[string]bool{"include_usage": true}
 	}
 	var probeBody any = probe
 	if openCode && strings.HasPrefix(strings.ToLower(request.Model), "muse-") {
@@ -250,9 +247,9 @@ func testManagementModel(hostCallbackID string, body []byte) pluginapi.Managemen
 		}
 		probeBody = map[string]any{
 			"model":             request.Model,
-			"instructions":      openCodeEnvironment,
+			"instructions":      opencodefingerprint.Environment(),
 			"input":             []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
-			"max_output_tokens": 32,
+			"max_output_tokens": 128,
 			"stream":            true,
 			"store":             false,
 			"tools":             openCodeResponseToolSet(),
@@ -314,11 +311,6 @@ func providerHeaders(apiKey string, custom map[string]string, contentType string
 	if apiKey := strings.TrimSpace(apiKey); apiKey != "" {
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
-	for name, values := range defaults {
-		if len(values) > 0 {
-			headers.Set(name, values[0])
-		}
-	}
 	for name, value := range custom {
 		name = strings.TrimSpace(name)
 		// A value like "$X-Opencode-Session" is a CLIProxyAPI reference this
@@ -328,6 +320,15 @@ func providerHeaders(apiKey string, custom map[string]string, contentType string
 			continue
 		}
 		headers.Set(name, value)
+	}
+	// Generated identity must win over stale configured fingerprint headers.
+	for name, values := range defaults {
+		if len(values) > 0 {
+			headers.Set(name, values[0])
+		}
+	}
+	if defaults != nil {
+		headers.Del("X-Opencode-Request")
 	}
 	return headers
 }
