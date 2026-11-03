@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/YogaSakti/free-model-sync/compare/v0.11.0...v0.11.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* align OpenCode probes with native v2 fingerprint ([a6440b0](https://github.com/YogaSakti/free-model-sync/commit/a6440b0e815cb35e352d90d4219028ccbe15cd9f))
+
 ## [0.11.0](https://github.com/YogaSakti/free-model-sync/compare/v0.10.1...v0.11.0) (2026-10-26)
 
 
